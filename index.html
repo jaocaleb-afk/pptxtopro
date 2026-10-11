@@ -69,7 +69,7 @@ footer{padding:16px 24px;border-top:1px solid #2b2e35;color:#737b88;font-size:11
       <button class="secondary" id="downloadPro">Download .pro</button>
       <button class="primary" id="downloadBundle">Download Presentation Bundle</button>
     </div>
-    <div class="note">Targets the ProPresenter 7.16.2 schema (reverse-engineered, unofficial). The file structure is checked against that schema here, but it has <b>not</b> been opened in ProPresenter yet — import it into a copy of your library first. The bundle is a ZIP with a .probundle extension: use <i>File → Import → Presentation Bundle</i>. If you only download the .pro, images will be missing.</div>
+    <div class="note">Targets the ProPresenter 7.16.2 schema (reverse-engineered, unofficial). The file structure is checked against that schema here, but it has <b>not</b> been opened in ProPresenter yet — import it into a copy of your library first. The bundle is a ZIP with a .probundle extension: use <i>File → Import → Presentation Bundle</i>. If you only download the .pro, images will be missing. Cropped PowerPoint pictures are cropped into new image files (named <i>…_cropN</i>) so the crop does not depend on ProPresenter's own crop fields.</div>
   </div>
 </main>
 <footer>Runs locally in your browser · No upload server · Schema: ProPresenter7-Proto 7.16.2 (MIT)</footer>
@@ -235,6 +235,42 @@ const toProColor = c => ({red:c.r/255, green:c.g/255, blue:c.b/255, alpha:c.alph
 
 /* ===== PPTX -> internal PresentationModel ===== */
 const IMG_OK = {png:1,jpg:1,jpeg:1,gif:1,bmp:1,tif:1,tiff:1};
+/* ===== Picture cropping (a:srcRect) =====
+   srcRect l/t/r/b are 1/1000 percent of the SOURCE image (100000 = 100%); negative values mean padding outside the image.
+   The picture frame (xfrm ext) is the size of the cropped region, so the cropped pixels simply fill the frame. */
+function readCrop(blipFill){ const sr = blipFill && kid(blipFill,"srcRect"); if(!sr) return null;
+  const g = a => (+sr.getAttribute(a)||0)/100000; const c = { l:g("l"), t:g("t"), r:g("r"), b:g("b") };
+  return (c.l||c.t||c.r||c.b) ? c : null; }
+const CROP_MAX_PX = 8192;
+// Bake the crop into new pixels in the browser (no backend). Returns {bytes, ext, w, h} or throws.
+async function bakeCrop(bytes, ext, c){
+  const mime = {png:"image/png",jpg:"image/jpeg",jpeg:"image/jpeg",gif:"image/gif",bmp:"image/bmp"}[ext]; if(!mime) throw new Error("cannot decode ."+ext+" in this browser");
+  const bmp = await createImageBitmap(new Blob([bytes],{type:mime})); const W=bmp.width, H=bmp.height;
+  const sw=(1-c.l-c.r)*W, sh=(1-c.t-c.b)*H; if(!(sw>=1) || !(sh>=1)){ bmp.close&&bmp.close(); throw new Error("crop leaves no visible area"); }
+  const sx=Math.round(c.l*W), sy=Math.round(c.t*H); let cw=Math.max(1,Math.round(sw)), ch=Math.max(1,Math.round(sh));
+  const k = Math.min(1, CROP_MAX_PX/Math.max(cw,ch)); // pixel-exact (scale 1) unless the result would be enormous
+  const ow=Math.max(1,Math.round(cw*k)), oh=Math.max(1,Math.round(ch*k));
+  const cv=document.createElement("canvas"); cv.width=ow; cv.height=oh; const cx=cv.getContext("2d"); cx.imageSmoothingEnabled=true; cx.imageSmoothingQuality="high";
+  cx.clearRect(0,0,ow,oh); cx.drawImage(bmp, -sx*k, -sy*k, W*k, H*k); bmp.close&&bmp.close();
+  const padded = c.l<0||c.t<0||c.r<0||c.b<0; const jpeg = (ext==="jpg"||ext==="jpeg") && !padded; // JPEG has no alpha: padded crops go to PNG
+  const blob = await new Promise(res=>cv.toBlob(res, jpeg?"image/jpeg":"image/png", 0.95)); if(!blob) throw new Error("canvas export failed");
+  return { bytes:new Uint8Array(await blob.arrayBuffer()), ext:jpeg?"jpg":"png", w:ow, h:oh }; }
+async function bakeAllCrops(out, warn){
+  const refs=[]; for(const s of out.slides){ if(s.bgImage&&s.bgImage.crop) refs.push({ref:s.bgImage, slide:s.index}); for(const it of s.elements) if(it.kind==="image"&&it.crop) refs.push({ref:it, slide:s.index}); }
+  const cache=new Map(); // source file + crop -> result (shared by every slide that uses the same crop, e.g. master/layout pictures)
+  for(const {ref,slide} of refs){ const c=ref.crop, orig=ref.file; const key=orig+"|"+[c.l,c.t,c.r,c.b].map(v=>v.toFixed(6)).join(",");
+    if(!cache.has(key)){ let res=null; try{ const ext=(orig.split(".").pop()||"").toLowerCase();
+        if(c.l+c.r>=1||c.t+c.b>=1) throw new Error("crop leaves no visible area");
+        const r=await bakeCrop(out.media[orig], ext, c); let name, n=1; const stem=orig.replace(/\.[^.]+$/,"");
+        do{ name=stem+"_crop"+(n++)+"."+r.ext; }while(name in out.media); out.media[name]=r.bytes; res={file:name, w:r.w, h:r.h, src:orig};
+      }catch(e){ warn("Slide "+slide+": picture crop for "+orig+" could not be applied ("+e.message+"); the uncropped picture was used."); }
+      cache.set(key,res); }
+    const res=cache.get(key); if(res){ ref.file=res.file; ref.cropBaked={ l:c.l, t:c.t, r:c.r, b:c.b, src:res.src, pw:res.w, ph:res.h }; }
+    delete ref.crop; }
+  // drop original images that are no longer referenced by any slide (they would only bloat the bundle)
+  const used=new Set(); for(const s of out.slides){ if(s.bgImage) used.add(s.bgImage.file); for(const it of s.elements) if(it.kind==="image") used.add(it.file); }
+  for(const f of Object.keys(out.media)) if(!used.has(f)) delete out.media[f];
+  out.cropCount=[...cache.values()].filter(Boolean).length; }
 async function parsePptx(buf, warn){
   const zip = await readZip(buf);
   if(!zip.has("ppt/presentation.xml")) throw new Error("This ZIP is not a PowerPoint (.pptx) presentation: ppt/presentation.xml is missing.");
@@ -338,14 +374,13 @@ async function parsePptx(buf, warn){
         if(n.localName==="pic"){
           const blip = path(n,"blipFill","blip"); const rid = blip && blip.getAttributeNS(NS_R,"embed"); const rel = rid && (isMasterLayer ? (isMasterLayer.rels[rid]) : slidePart.rels[rid]);
           if(!rel){ continue; } const file = addMedia(rel.target); if(!file) continue;
-          const sr = path(n,"blipFill","srcRect"); if(sr && [...sr.attributes].some(a=>+a.value)) warn("Slide "+(si+1)+": picture cropping was ignored for "+file+" (shown uncropped & stretched).");
-          list.push({ kind:"image", name:name||file, file, bounds, srcPath:rel.target }); continue; }
+          list.push({ kind:"image", name:name||file, file, bounds, srcPath:rel.target, crop:readCrop(path(n,"blipFill")) }); continue; }
         // sp
         const spPr = path(n,"spPr"); const geom = attr(path(spPr,"prstGeom"),"prst")||"rect";
         const fillNode = path(spPr,"solidFill"); const fillCol = fillNode ? resolveColor(fillNode,ctx) : null;
         const blipFill = path(spPr,"blipFill");
         const t = textOf(n, ph);
-        if(blipFill && !t){ const blip=path(blipFill,"blip"), rid=blip&&blip.getAttributeNS(NS_R,"embed"), rel=rid&&(isMasterLayer?isMasterLayer.rels[rid]:slidePart.rels[rid]); if(rel){ const f=addMedia(rel.target); if(f) list.push({kind:"image",name:name||f,file:f,bounds,srcPath:rel.target}); continue; } }
+        if(blipFill && !t){ const blip=path(blipFill,"blip"), rid=blip&&blip.getAttributeNS(NS_R,"embed"), rel=rid&&(isMasterLayer?isMasterLayer.rels[rid]:slidePart.rels[rid]); if(rel){ const f=addMedia(rel.target); if(f) list.push({kind:"image",name:name||f,file:f,bounds,srcPath:rel.target,crop:readCrop(blipFill)}); continue; } }
         if(!t && !fillCol) continue;
         if(!["rect","roundRect","textbox"].includes(geom) && fillCol && !t){ warn("Slide "+(si+1)+": shape '"+geom+"' was skipped (only rectangles are supported)."); continue; }
         if(!["rect","roundRect"].includes(geom) && fillCol && t) warn("Slide "+(si+1)+": '"+geom+"' shape fill was drawn as a rectangle behind its text.");
@@ -357,7 +392,7 @@ async function parsePptx(buf, warn){
     for(const part of [slidePart, layout, master]){ if(!part) continue; const bg = path(part.doc.documentElement,"cSld","bg"); if(!bg) continue;
       const pr = path(bg,"bgPr"), ref = path(bg,"bgRef");
       if(pr){ const sf=path(pr,"solidFill"); if(sf){ slide.bg = resolveColor(sf,ctx); break; }
-        const bf=path(pr,"blipFill"); if(bf){ const rid=path(bf,"blip")?.getAttributeNS(NS_R,"embed"); const rel=rid&&part.rels[rid]; if(rel){ const f=addMedia(rel.target); if(f){ slide.bgImage={file:f,srcPath:rel.target}; break; } } }
+        const bf=path(pr,"blipFill"); if(bf){ const rid=path(bf,"blip")?.getAttributeNS(NS_R,"embed"); const rel=rid&&part.rels[rid]; if(rel){ const f=addMedia(rel.target); if(f){ slide.bgImage={file:f,srcPath:rel.target,crop:readCrop(bf)}; break; } } }
         const gf=path(pr,"gradFill"); if(gf){ const gs=path(gf,"gsLst","gs"); slide.bg=resolveColor(gs,ctx); warn("Slide "+(si+1)+": gradient background approximated by its first color."); break; } }
       else if(ref){ const c=resolveColor(ref,ctx); if(c){ slide.bg=c; break; } } }
     // content: master shapes, layout shapes, then slide
@@ -370,6 +405,7 @@ async function parsePptx(buf, warn){
   }
   for(const [p,file] of Object.entries(mediaUse)){ out.media[file] = await zip.get(p); }
   out.mediaSrc = mediaUse;
+  await bakeAllCrops(out, warn);
   return out;
 }
 
@@ -443,7 +479,7 @@ function buildProPresenterPresentation(model, name){
 const UUID_RE = /^[0-9A-F]{8}-[0-9A-F]{4}-4[0-9A-F]{3}-[89AB][0-9A-F]{3}-[0-9A-F]{12}$/;
 function sameBytes(a,b){ if(a.length!==b.length) return false; for(let i=0;i<a.length;i++) if(a[i]!==b[i]) return false; return true; }
 function verifyPresentation(bytes, model, mediaFiles){
-  const issues=[]; let p; const stats={cues:0,elements:0,text:0,images:0,rects:0,refs:0,files:0,uuids:0};
+  const issues=[]; let p; const stats={cues:0,elements:0,text:0,images:0,rects:0,refs:0,files:0,uuids:0,cropped:0};
   try{ p = decMsg("Presentation", bytes); }catch(e){ return { ok:false, issues:["decode failed: "+e.message], ...stats }; }
   // 1. round trip: decode -> encode must reproduce the exact bytes
   try{ if(!sameBytes(encMsg("Presentation", p), bytes)) issues.push("protobuf round-trip is not byte-identical"); }catch(e){ issues.push("round-trip encode failed: "+e.message); }
@@ -466,7 +502,7 @@ function verifyPresentation(bytes, model, mediaFiles){
     const sl=act.slide&&act.slide.presentation&&act.slide.presentation.base_slide; if(!sl){ issues.push(w+": action has no presentation.base_slide"); return; }
     noteId(sl.uuid,w+" base_slide"); if(!sl.size||!(sl.size.width>0)||!(sl.size.height>0)) issues.push(w+": slide size missing");
     const els=sl.elements||[]; if(ms && els.length!==kindsWanted(ms)) issues.push(w+": "+els.length+" elements, expected "+kindsWanted(ms));
-    const wanted = ms ? [...(ms.bgImage?[{kind:"image",file:ms.bgImage.file}]:[]), ...ms.elements] : [];
+    const wanted = ms ? [...(ms.bgImage?[{kind:"image",file:ms.bgImage.file,cropBaked:ms.bgImage.cropBaked}]:[]), ...ms.elements] : [];
     els.forEach((se,ei)=>{ const e=se.element, ew=w+" element "+(ei+1); stats.elements++;
       if(!e){ issues.push(ew+": Slide.Element has no Graphics.Element"); return; }
       noteId(e.uuid,ew); if(!e.bounds||!e.bounds.size||!(e.bounds.size.width>0)||!(e.bounds.size.height>0)) issues.push(ew+": bounds missing or zero size");
@@ -484,7 +520,11 @@ function verifyPresentation(bytes, model, mediaFiles){
         if(!u||!u.platform) issues.push(ew+": media URL has no platform");
         const iu=m.image&&m.image.file&&m.image.file.local_url; if(!iu||!u||iu.relative_path!==u.relative_path) issues.push(ew+": image.file.local_url does not match media url");
         if(!m.image||!m.image.drawing) issues.push(ew+": image drawing properties missing");
-        if(want&&(want.kind!=="image"||want.file!==(u&&u.relative_path))) issues.push(ew+": media file differs from model"); }
+        if(want&&(want.kind!=="image"||want.file!==(u&&u.relative_path))) issues.push(ew+": media file differs from model");
+        const cb=want&&want.cropBaked; if(cb){ stats.cropped=(stats.cropped||0)+1; const px=model.media[u&&u.relative_path]&&imgSize(model.media[u.relative_path]); const nsz=m.image&&m.image.drawing&&m.image.drawing.natural_size;
+          if(!px||px.w!==cb.pw||px.h!==cb.ph) issues.push(ew+": cropped image file is "+(px?px.w+"x"+px.h:"unreadable")+", expected "+cb.pw+"x"+cb.ph);
+          if(!nsz||nsz.width!==cb.pw||nsz.height!==cb.ph) issues.push(ew+": natural_size does not match the cropped pixels");
+          if(u&&u.relative_path===cb.src) issues.push(ew+": cropped picture still points at the uncropped source "+cb.src); } }
       else if(e.fill&&e.fill.color){ stats.rects++; if(want&&want.kind!=="rect") issues.push(ew+": model expects "+want.kind+" but element is a color rectangle"); }
       else issues.push(ew+": element has neither text, media nor color fill (nothing to draw)"); }); });
   for(const f of need) if(!mediaFiles.includes(f)) issues.push("media '"+f+"' is referenced but not in the bundle file list");
@@ -540,11 +580,11 @@ async function convert(){
     const bIssues=await verifyBundle(bundle, pro, base, mediaFiles, model); if(bIssues.length) throw new Error("Bundle check failed: "+bIssues.join(", "));
     step("bundle","done");
     output={pro,bundle,base};
-    $("resultSub").textContent=model.slides.length+" slides, "+nEl+" objects, "+mediaFiles.length+" media file"+(mediaFiles.length===1?"":"s")+". Schema self-check passed: "+chk.cues+" slides, "+chk.elements+" elements ("+chk.text+" text, "+chk.images+" image, "+chk.rects+" shape) re-read from the encoded bytes; "+chk.refs+" media references resolve to files inside the bundle.";
+    $("resultSub").textContent=model.slides.length+" slides, "+nEl+" objects, "+mediaFiles.length+" media file"+(mediaFiles.length===1?"":"s")+". Schema self-check passed: "+chk.cues+" slides, "+chk.elements+" elements ("+chk.text+" text, "+chk.images+" image, "+chk.rects+" shape) re-read from the encoded bytes; "+chk.refs+" media references resolve to files inside the bundle."+(chk.cropped?" "+chk.cropped+" cropped picture"+(chk.cropped===1?"":"s")+" saved as pre-cropped image"+(model.cropCount===1?"":"s")+".":"");
     $("results").style.display="block"; $("status").textContent="Complete";
     if(warnings.length){ const w=$("warning"); w.innerHTML="<b>Not everything could be carried over:</b><ul>"+warnings.map(x=>"<li></li>").join("")+"</ul>"; [...w.querySelectorAll("li")].forEach((li,i)=>li.textContent=warnings[i]); w.style.display="block"; }
     window.__result={slides:model.slides.length, media:mediaFiles, warnings, check:chk};
-    window.__output=output;
+    window.__output=output; window.__model=model;
   }catch(e){ console.error(e); step(cur,"fail"); showErr(e.message||String(e)); window.__result={error:e.message}; }
   drop.classList.remove("disabled");
 }
