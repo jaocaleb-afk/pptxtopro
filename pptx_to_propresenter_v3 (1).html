@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PPTX → ProPresenter</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;background:#101114;color:#f5f7fa;display:grid;place-items:center;padding:28px}
+.app{width:min(760px,100%);background:#181a1f;border:1px solid #30343c;border-radius:20px;box-shadow:0 24px 80px #0008;overflow:hidden}
+.top{height:68px;padding:0 24px;display:flex;align-items:center;border-bottom:1px solid #2b2e35}
+.logo{font-weight:750;letter-spacing:-.02em}.logo span{color:#55a8ff}
+.status{margin-left:auto;font-size:12px;color:#9ca3af}
+main{padding:42px}
+h1{font-size:34px;letter-spacing:-.04em;margin:0 0 10px}
+.sub{color:#aeb4bf;margin:0 0 30px;line-height:1.5}
+.drop{border:1.5px dashed #4a505c;border-radius:16px;padding:38px 24px;text-align:center;background:#13151a;transition:.18s}
+.drop.over{border-color:#55a8ff;background:#172235}
+.drop.disabled{opacity:.55;pointer-events:none}
+.icon{font-size:42px;margin-bottom:12px}
+.file{margin:18px auto 0;padding:11px 14px;border:1px solid #343943;border-radius:10px;background:#1b1e24;text-align:left;display:none;max-width:500px}
+.file b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.file small{color:#8f96a2}
+button{border:0;border-radius:10px;padding:12px 18px;font:inherit;font-weight:650;cursor:pointer}
+.primary{background:#fff;color:#111}.primary:hover{background:#e7ebf0}
+.secondary{background:#282c34;color:#fff;border:1px solid #3a3f49}.secondary:hover{background:#31363f}
+input{display:none}
+.steps{display:none;margin-top:26px;list-style:none;padding:0}
+.steps li{padding:6px 0;color:#6b7280;font-size:14px;display:flex;gap:10px}
+.steps li i{font-style:normal;width:18px;text-align:center}
+.steps li.run{color:#aeb4bf}.steps li.done{color:#e5e7eb}.steps li.done i{color:#6ee7a0}.steps li.fail{color:#ff9b9b}
+.results{display:none;margin-top:26px;border-top:1px solid #2b2e35;padding-top:26px}
+.resultTitle{font-weight:700}.resultSub{color:#9299a5;font-size:13px;margin:4px 0 18px;line-height:1.5}
+.actions{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.note{margin-top:18px;font-size:12px;line-height:1.55;color:#7f8793}
+.warn{display:none;margin-top:20px;padding:13px 14px;border:1px solid #604c26;background:#2b2417;color:#e8c982;border-radius:10px;font-size:13px;line-height:1.45}
+.warn ul{margin:6px 0 0;padding-left:18px}
+.err{display:none;margin-top:20px;padding:13px 14px;border:1px solid #6a2c2c;background:#2a1717;color:#ffb4b4;border-radius:10px;font-size:13px}
+footer{padding:16px 24px;border-top:1px solid #2b2e35;color:#737b88;font-size:11px;text-align:center}
+@media(max-width:600px){body{padding:10px}.app{border-radius:14px}main{padding:28px 20px}h1{font-size:28px}.actions{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<section class="app">
+<header class="top"><div class="logo">PPTX <span>→</span> ProPresenter</div><div class="status" id="status">Ready</div></header>
+<main>
+  <h1>Convert your presentation.</h1>
+  <p class="sub">Upload a PowerPoint file. Slides, text, images and backgrounds are converted into a ProPresenter 7 presentation.</p>
+  <div class="drop" id="drop">
+    <div class="icon">↑</div>
+    <button class="primary" id="choose">Upload PPTX</button>
+    <p style="margin:13px 0 0;color:#858d9a;font-size:13px">or drag and drop a .pptx file here</p>
+    <input id="fileInput" type="file" accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation">
+    <div class="file" id="fileInfo"><b id="fileName"></b><small id="fileSize"></small></div>
+  </div>
+  <ul class="steps" id="steps">
+    <li data-s="read"><i>○</i>Presentation read</li>
+    <li data-s="slides"><i>○</i>Slides converted</li>
+    <li data-s="media"><i>○</i>Media extracted</li>
+    <li data-s="pro"><i>○</i>ProPresenter presentation created</li>
+    <li data-s="bundle"><i>○</i>Bundle created and checked</li>
+  </ul>
+  <div class="err" id="err"></div>
+  <div class="warn" id="warning"></div>
+  <div class="results" id="results">
+    <div class="resultTitle">Conversion complete</div>
+    <div class="resultSub" id="resultSub"></div>
+    <div class="actions">
+      <button class="secondary" id="downloadPro">Download .pro</button>
+      <button class="primary" id="downloadBundle">Download Presentation Bundle</button>
+    </div>
+    <div class="note">Targets the ProPresenter 7.16.2 schema (reverse-engineered, unofficial). The file structure is checked against that schema here, but it has <b>not</b> been opened in ProPresenter yet — import it into a copy of your library first. The bundle is a ZIP with a .probundle extension: use <i>File → Import → Presentation Bundle</i>. If you only download the .pro, images will be missing.</div>
+  </div>
+</main>
+<footer>Runs locally in your browser · No upload server · Schema: ProPresenter7-Proto 7.16.2 (MIT)</footer>
+</section>
+<script>
+const SCHEMA = {"m":{"Action":{"uuid":[1,"UUID",0,0],"name":[2,"string",0,0],"label":[3,"Action.Label",0,0],"delay_time":[4,"double",0,0],"old_type":[5,"Action.OldType",0,0],"isEnabled":[6,"bool",0,0],"layer_identification":[7,"Action.LayerIdentification",0,0],"duration":[8,"double",0,0],"type":[9,"Action.ActionType",0,0],"collection_element":[16,"CollectionElementType",0,"ActionTypeData"],"playlist_item":[17,"Action.PlaylistItemType",0,"ActionTypeData"],"blend_mode":[18,"Action.BlendModeType",0,"ActionTypeData"],"transition":[19,"Action.TransitionType",0,"ActionTypeData"],"media":[20,"Action.MediaType",0,"ActionTypeData"],"double_item":[21,"Action.DoubleType",0,"ActionTypeData"],"effects":[22,"Action.EffectsType",0,"ActionTypeData"],"slide":[23,"Action.SlideType",0,"ActionTypeData"],"background":[24,"Action.BackgroundType",0,"ActionTypeData"],"timer":[25,"Action.TimerType",0,"ActionTypeData"],"clear":[26,"Action.ClearType",0,"ActionTypeData"],"stage":[27,"Action.StageLayoutType",0,"ActionTypeData"],"prop":[28,"Action.PropType",0,"ActionTypeData"],"mask":[29,"Action.MaskType",0,"ActionTypeData"],"message":[30,"Action.MessageType",0,"ActionTypeData"],"communication":[32,"Action.CommunicationType",0,"ActionTypeData"],"multi_screen":[33,"Action.MultiScreenType",0,"ActionTypeData"],"presentation_document":[34,"Action.DocumentType",0,"ActionTypeData"],"external_presentation":[36,"Action.ExternalPresentationType",0,"ActionTypeData"],"audience_look":[37,"Action.AudienceLookType",0,"ActionTypeData"],"audio_input":[38,"Action.AudioInputType",0,"ActionTypeData"],"slide_destination":[39,"Action.SlideDestinationType",0,"ActionTypeData"],"macro":[40,"Action.MacroType",0,"ActionTypeData"],"clear_group":[41,"Action.ClearGroupType",0,"ActionTypeData"],"transport_control":[42,"Action.TransportControlType",0,"ActionTypeData"],"capture":[43,"Action.CaptureType",0,"ActionTypeData"]},"Action.AudienceLookType":{"identification":[1,"CollectionElementType",0,0]},"Action.AudioInputType":{"index":[1,"int32",0,0],"override_mode":[2,"bool",0,0],"behavior_mode":[3,"AudioInput.BehaviorMode",0,0],"override_volume":[4,"bool",0,0],"volume":[5,"double",0,0]},"Action.BackgroundType":{"element":[1,"Background",0,0]},"Action.BlendModeType":{"blend_mode":[1,"Layer.BlendMode",0,0],"blend":[2,"Layer.Blending",0,0]},"Action.CaptureType":{"start":[1,"Action.CaptureType.CaptureStart",0,"CaptureAction"],"stop":[2,"Action.CaptureType.CaptureStop",0,"CaptureAction"]},"Action.CaptureType.CaptureStart":{"preset_identification":[1,"CollectionElementType",0,0]},"Action.CaptureType.CaptureStop":{"shows_alert_before_stopping":[1,"bool",0,0]},"Action.ClearGroupType":{"identification":[1,"CollectionElementType",0,0]},"Action.ClearType":{"target_layer":[2,"Action.ClearType.ClearTargetLayer",0,0],"content_destination":[4,"Action.ContentDestination",0,0]},"Action.CommunicationType":{"device_identification":[1,"CollectionElementType",0,0],"format":[2,"string",0,0],"description":[3,"string",0,0],"commands":[4,"Action.CommunicationType.Command",1,0],"midi_command":[5,"Action.CommunicationType.MIDICommand",0,"CommandTypeData"],"global_cache_command":[6,"Action.CommunicationType.GlobalCacheCommand",0,"CommandTypeData"],"gvg100_command":[7,"Action.CommunicationType.GVG100Command",0,"CommandTypeData"],"sony_BVS_command":[8,"Action.CommunicationType.SonyBVSCommand",0,"CommandTypeData"]},"Action.CommunicationType.Command":{"name":[1,"string",0,0],"value":[2,"string",0,0],"replacement_range":[3,"IntRange",0,0],"possible_values":[4,"string",1,0]},"Action.CommunicationType.GVG100Command":{"command_action":[1,"Action.CommunicationType.GVG100Command.CommandAction",0,0]},"Action.CommunicationType.GlobalCacheCommand":{"command_action":[1,"Action.CommunicationType.GlobalCacheCommand.CommandAction",0,0],"output":[2,"uint32",0,0],"interval":[3,"uint32",0,0]},"Action.CommunicationType.MIDICommand":{"state":[1,"Action.CommunicationType.MIDICommand.State",0,0],"channel":[2,"uint32",0,0],"note":[3,"uint32",0,0],"intensity":[4,"uint32",0,0]},"Action.CommunicationType.SonyBVSCommand":{"command_action":[1,"Action.CommunicationType.SonyBVSCommand.CommandAction",0,0]},"Action.DocumentType":{"identification":[1,"CollectionElementType",0,0],"selected_arrangement":[2,"UUID",0,0],"content_destination":[3,"Action.ContentDestination",0,0]},"Action.DoubleType":{"value":[1,"double",0,0]},"Action.EffectsType":{"effects":[1,"Effect",1,0]},"Action.ExternalPresentationType":{"url":[1,"URL",0,0]},"Action.Label":{"text":[2,"string",0,0],"color":[3,"Color",0,0]},"Action.LayerIdentification":{"uuid":[1,"UUID",0,0],"name":[2,"string",0,0]},"Action.MacroType":{"identification":[1,"CollectionElementType",0,0]},"Action.MaskType":{"identification":[3,"CollectionElementType",0,0]},"Action.MediaType":{"transition_duration":[1,"double",0,0],"selected_effect_preset_uuid":[2,"UUID",0,0],"transition":[3,"Transition",0,0],"effects":[4,"Effect",1,0],"element":[5,"Media",0,0],"layer_type":[10,"Action.LayerType",0,0],"always_retrigger":[11,"bool",0,0],"markers":[12,"Action.MediaType.PlaybackMarker",1,0],"image":[6,"Action.MediaType.Image",0,"MediaType"],"video":[7,"Action.MediaType.Video",0,"MediaType"],"audio":[8,"Action.MediaType.Audio",0,"MediaType"],"live_video":[9,"Action.MediaType.LiveVideo",0,"MediaType"]},"Action.MediaType.Audio":{"playback_behavior":[1,"Action.MediaType.PlaybackBehavior",0,0],"loop_time":[2,"double",0,0],"times_to_loop":[3,"uint32",0,0],"audio_type":[4,"Action.MediaType.Audio.MediaActionAudioType",0,0]},"Action.MediaType.Image":{},"Action.MediaType.LiveVideo":{},"Action.MediaType.PlaybackMarker":{"uuid":[1,"UUID",0,0],"time":[2,"double",0,0],"color":[3,"Color",0,0],"name":[4,"string",0,0],"actions":[5,"Action",1,0]},"Action.MediaType.Video":{"playback_behavior":[1,"Action.MediaType.PlaybackBehavior",0,0],"end_behavior":[2,"Action.MediaType.EndBehavior",0,0],"loop_time":[3,"double",0,0],"times_to_loop":[4,"uint32",0,0],"soft_loop":[5,"bool",0,0],"soft_loop_duration":[6,"double",0,0]},"Action.MessageType":{"message_identificaton":[1,"CollectionElementType",0,0],"content":[3,"Message.TokenValue",1,0]},"Action.MultiScreenType":{"identification":[3,"CollectionElementType",0,0]},"Action.OldType":{"category":[1,"Action.OldType.Category",0,0],"application_type":[2,"int32",0,0]},"Action.PlaylistItemType":{"playlist_uuid":[1,"UUID",0,0],"playlist_name":[2,"string",0,0],"item_uuid":[3,"UUID",0,0],"item_name":[4,"string",0,0],"select_playlist":[5,"bool",0,0],"always_retrigger":[6,"bool",0,0]},"Action.PropType":{"identification":[3,"CollectionElementType",0,0]},"Action.SlideDestinationType":{"slide_target":[1,"Action.StageLayoutType.SlideTarget",0,0]},"Action.SlideType":{"presentation":[2,"PresentationSlide",0,"Slide"],"prop":[3,"PropSlide",0,"Slide"]},"Action.StageLayoutType":{"stage_screen_assignments":[4,"Stage.ScreenAssignment",1,0],"slide_target":[5,"Action.StageLayoutType.SlideTarget",0,0]},"Action.TimerType":{"action_type":[2,"Action.TimerType.TimerAction",0,0],"timer_identification":[4,"CollectionElementType",0,0],"timer_configuration":[10,"Timer.Configuration",0,0],"increment_amount":[11,"double",0,0]},"Action.TransitionType":{"transition_name":[1,"string",0,0],"transition":[2,"Transition",0,0]},"Action.TransportControlType":{"play":[1,"Action.TransportControlType.Play",0,"Command"],"pause":[2,"Action.TransportControlType.Pause",0,"Command"],"jumpToTime":[3,"Action.TransportControlType.JumpToTime",0,"Command"]},"Action.TransportControlType.JumpToTime":{"time":[1,"double",0,0]},"Action.TransportControlType.Pause":{},"Action.TransportControlType.Play":{},"AlignmentGuide":{"uuid":[1,"UUID",0,0],"orientation":[2,"AlignmentGuide.GuidelineOrientation",0,0],"location":[3,"double",0,0]},"ApplicationInfo":{"platform":[1,"ApplicationInfo.Platform",0,0],"platform_version":[2,"Version",0,0],"application":[3,"ApplicationInfo.Application",0,0],"application_version":[4,"Version",0,0]},"AudioInput.BehaviorMode":{"on":[1,"AudioInput.BehaviorMode.On",0,"Mode"],"off":[2,"AudioInput.BehaviorMode.Off",0,"Mode"],"auto_on":[3,"AudioInput.BehaviorMode.AutoOn",0,"Mode"],"auto_off":[4,"AudioInput.BehaviorMode.AutoOff",0,"Mode"]},"AudioInput.BehaviorMode.AutoOff":{},"AudioInput.BehaviorMode.AutoOn":{"linked_video_inputs":[1,"uint32",1,0]},"AudioInput.BehaviorMode.Off":{},"AudioInput.BehaviorMode.On":{},"Background":{"is_enabled":[3,"bool",0,0],"color":[1,"Color",0,"Fill"],"gradient":[2,"Graphics.Gradient",0,"Fill"]},"Clock.Format":{"date_type":[2,"Clock.Format.DateFormatterStyle",0,0],"time_format":[3,"Clock.Format.DateFormatterStyle",0,0],"military_time_enabled":[4,"bool",0,0]},"CollectionElementType":{"parameter_uuid":[1,"UUID",0,0],"parameter_name":[2,"string",0,0],"parent_collection":[3,"CollectionElementType",0,0]},"Color":{"red":[1,"float",0,0],"green":[2,"float",0,0],"blue":[3,"float",0,0],"alpha":[4,"float",0,0]},"Cue":{"uuid":[1,"UUID",0,0],"name":[2,"string",0,0],"completion_target_type":[3,"Cue.CompletionTargetType",0,0],"completion_target_uuid":[4,"UUID",0,0],"completion_action_type":[5,"Cue.CompletionActionType",0,0],"completion_action_uuid":[6,"UUID",0,0],"trigger_time":[7,"Cue.TimecodeTime",0,0],"hot_key":[8,"HotKey",0,0],"actions":[10,"Action",1,0],"pending_imports":[11,"Cue.PendingImportsEntry",1,0],"isEnabled":[12,"bool",0,0],"completion_time":[13,"double",0,0]},"Cue.PendingImportsEntry":{"key":[1,"string",0,0],"value":[2,"URLs",0,0]},"Cue.TimecodeTime":{"time":[1,"double",0,0]},"DigitalAudio.Device.Channel":{"mute_enable":[1,"bool",0,0],"solo_enable":[2,"bool",0,0],"tone_enable":[3,"bool",0,0],"audio_delay":[4,"double",0,0],"level":[5,"double",0,0]},"DigitalAudio.Device.Map":{"channel_index":[1,"uint32",0,0],"mapped_indices":[2,"uint32",1,0]},"DigitalAudio.Device.Routing":{"channels":[1,"DigitalAudio.Device.Channel",1,0],"map":[2,"DigitalAudio.Device.Map",1,0],"is_custom_map":[3,"bool",0,0],"master_channel":[4,"DigitalAudio.Device.Channel",0,0]},"Effect":{"uuid":[1,"UUID",0,0],"enabled":[2,"bool",0,0],"name":[3,"string",0,0],"render_id":[4,"string",0,0],"behavior_description":[5,"string",0,0],"category":[6,"string",0,0],"variables":[7,"Effect.EffectVariable",1,0]},"Effect.EffectVariable":{"name":[1,"string",0,0],"description":[2,"string",0,0],"int":[3,"Effect.EffectVariable.EffectInt",0,"Type"],"float":[4,"Effect.EffectVariable.EffectFloat",0,"Type"],"color":[5,"Effect.EffectVariable.EffectColor",0,"Type"],"direction":[6,"Effect.EffectVariable.EffectDirection",0,"Type"],"double":[7,"Effect.EffectVariable.EffectDouble",0,"Type"]},"Effect.EffectVariable.EffectColor":{"color":[1,"Color",0,0],"default_color":[2,"Color",0,0]},"Effect.EffectVariable.EffectDirection":{"direction":[1,"Effect.EffectVariable.EffectDirection.EffectDirection",0,0],"default_direction":[2,"Effect.EffectVariable.EffectDirection.EffectDirection",0,0],"available_directions":[3,"uint32",0,0]},"Effect.EffectVariable.EffectDouble":{"value":[1,"double",0,0],"default_value":[2,"double",0,0],"min":[3,"double",0,0],"max":[4,"double",0,0]},"Effect.EffectVariable.EffectFloat":{"value":[1,"float",0,0],"default_value":[2,"float",0,0],"min":[3,"float",0,0],"max":[4,"float",0,0]},"Effect.EffectVariable.EffectInt":{"value":[1,"int32",0,0],"default_value":[2,"int32",0,0],"min":[3,"int32",0,0],"max":[4,"int32",0,0]},"FileProperties":{"local_url":[1,"URL",0,0],"remote_properties":[2,"FileProperties.RemoteProperties",0,0]},"FileProperties.RemoteProperties":{"procontent":[1,"FileProperties.RemoteProperties.ProContent",0,0]},"FileProperties.RemoteProperties.ProContent":{"download_identifier":[1,"string",0,0]},"Font":{"name":[1,"string",0,0],"size":[2,"double",0,0],"italic":[4,"bool",0,0],"bold":[8,"bool",0,0],"family":[9,"string",0,0],"face":[10,"string",0,0]},"Graphics.BackgroundEffect":{"backgroundBlur":[2,"Graphics.BackgroundEffect.BackgroundEffectBlur",0,"EffectType"],"backgroundInvert":[3,"Graphics.BackgroundEffect.BackgroundEffectInvert",0,"EffectType"]},"Graphics.BackgroundEffect.BackgroundEffectBlur":{"saturation":[1,"double",0,0],"blur_amount":[2,"double",0,0]},"Graphics.BackgroundEffect.BackgroundEffectInvert":{},"Graphics.EdgeInsets":{"left":[1,"double",0,0],"right":[2,"double",0,0],"top":[3,"double",0,0],"bottom":[4,"double",0,0]},"Graphics.Element":{"uuid":[1,"UUID",0,0],"name":[2,"string",0,0],"bounds":[3,"Graphics.Rect",0,0],"rotation":[4,"double",0,0],"opacity":[5,"double",0,0],"locked":[6,"bool",0,0],"aspect_ratio_locked":[7,"bool",0,0],"path":[8,"Graphics.Path",0,0],"fill":[9,"Graphics.Fill",0,0],"stroke":[10,"Graphics.Stroke",0,0],"shadow":[11,"Graphics.Shadow",0,0],"feather":[12,"Graphics.Feather",0,0],"text":[13,"Graphics.Text",0,0],"flipMode":[15,"Graphics.Element.FlipMode",0,0],"hidden":[16,"bool",0,0],"text_line_mask":[14,"Graphics.Text.LineFillMask",0,"Mask"]},"Graphics.Feather":{"style":[1,"Graphics.Feather.Style",0,0],"radius":[2,"double",0,0],"enable":[3,"bool",0,0]},"Graphics.Fill":{"enable":[4,"bool",0,0],"color":[1,"Color",0,"FillType"],"gradient":[2,"Graphics.Gradient",0,"FillType"],"media":[3,"Media",0,"FillType"],"backgroundEffect":[5,"Graphics.BackgroundEffect",0,"FillType"]},"Graphics.Gradient":{"type":[1,"Graphics.Gradient.Type",0,0],"angle":[2,"double",0,0],"length":[3,"double",0,0],"stops":[4,"Graphics.Gradient.ColorStop",1,0]},"Graphics.Gradient.ColorStop":{"color":[1,"Color",0,0],"position":[2,"double",0,0],"blend_point":[3,"double",0,0]},"Graphics.Path":{"closed":[1,"bool",0,0],"points":[2,"Graphics.Path.BezierPoint",1,0],"shape":[3,"Graphics.Path.Shape",0,0]},"Graphics.Path.BezierPoint":{"point":[1,"Graphics.Point",0,0],"q0":[2,"Graphics.Point",0,0],"q1":[3,"Graphics.Point",0,0],"curved":[4,"bool",0,0]},"Graphics.Path.Shape":{"type":[1,"Graphics.Path.Shape.Type",0,0],"rounded_rectangle":[2,"Graphics.Path.Shape.RoundedRectangle",0,"AdditionalData"],"polygon":[3,"Graphics.Path.Shape.Polygon",0,"AdditionalData"],"star":[4,"Graphics.Path.Shape.Star",0,"AdditionalData"],"arrow":[5,"Graphics.Path.Shape.Arrow",0,"AdditionalData"]},"Graphics.Path.Shape.Arrow":{"corner":[1,"Graphics.Point",0,0]},"Graphics.Path.Shape.Polygon":{"number_sides":[1,"uint32",0,0]},"Graphics.Path.Shape.RoundedRectangle":{"roundness":[1,"double",0,0]},"Graphics.Path.Shape.Star":{"inner_radius":[1,"double",0,0],"number_points":[2,"uint32",0,0]},"Graphics.Point":{"x":[1,"double",0,0],"y":[2,"double",0,0]},"Graphics.Rect":{"origin":[1,"Graphics.Point",0,0],"size":[2,"Graphics.Size",0,0]},"Graphics.Shadow":{"style":[1,"Graphics.Shadow.Style",0,0],"angle":[2,"double",0,0],"offset":[3,"double",0,0],"radius":[4,"double",0,0],"color":[5,"Color",0,0],"opacity":[6,"double",0,0],"enable":[7,"bool",0,0]},"Graphics.Size":{"width":[1,"double",0,0],"height":[2,"double",0,0]},"Graphics.Stroke":{"style":[1,"Graphics.Stroke.Style",0,0],"width":[2,"double",0,0],"color":[3,"Color",0,0],"pattern":[4,"double",1,0],"enable":[5,"bool",0,0]},"Graphics.Text":{"attributes":[3,"Graphics.Text.Attributes",0,0],"shadow":[4,"Graphics.Shadow",0,0],"rtf_data":[5,"bytes",0,0],"vertical_alignment":[6,"Graphics.Text.VerticalAlignment",0,0],"scale_behavior":[7,"Graphics.Text.ScaleBehavior",0,0],"margins":[8,"Graphics.EdgeInsets",0,0],"is_superscript_standardized":[9,"bool",0,0],"transform":[10,"Graphics.Text.Transform",0,0],"transformDelimiter":[11,"string",0,0],"chord_pro":[12,"Graphics.Text.ChordPro",0,0]},"Graphics.Text.Attributes":{"font":[1,"Font",0,0],"capitalization":[2,"Graphics.Text.Attributes.Capitalization",0,0],"underline_style":[4,"Graphics.Text.Attributes.Underline",0,0],"underline_color":[5,"Color",0,0],"paragraph_style":[6,"Graphics.Text.Attributes.Paragraph",0,0],"kerning":[7,"double",0,0],"superscript":[8,"int32",0,0],"strikethrough_style":[9,"Graphics.Text.Attributes.Underline",0,0],"strikethrough_color":[10,"Color",0,0],"stroke_width":[11,"double",0,0],"stroke_color":[12,"Color",0,0],"custom_attributes":[13,"Graphics.Text.Attributes.CustomAttribute",1,0],"background_color":[15,"Color",0,0],"text_solid_fill":[3,"Color",0,"fill"],"text_gradient_fill":[14,"Graphics.Text.GradientFill",0,"fill"],"cut_out_fill":[16,"Graphics.Text.CutOutFill",0,"fill"],"media_fill":[17,"Graphics.Text.MediaFill",0,"fill"],"background_effect":[18,"Graphics.BackgroundEffect",0,"fill"]},"Graphics.Text.Attributes.CustomAttribute":{"range":[1,"IntRange",0,0],"capitalization":[2,"Graphics.Text.Attributes.Capitalization",0,"Attribute"],"original_font_size":[3,"double",0,"Attribute"],"font_scale_factor":[4,"double",0,"Attribute"],"text_gradient_fill":[5,"Graphics.Text.GradientFill",0,"Attribute"],"should_preserve_foreground_color":[6,"bool",0,"Attribute"],"chord":[7,"string",0,"Attribute"],"cut_out_fill":[8,"Graphics.Text.CutOutFill",0,"Attribute"],"media_fill":[9,"Graphics.Text.MediaFill",0,"Attribute"],"background_effect":[10,"Graphics.BackgroundEffect",0,"Attribute"]},"Graphics.Text.Attributes.Paragraph":{"alignment":[1,"Graphics.Text.Attributes.Alignment",0,0],"first_line_head_indent":[2,"double",0,0],"head_indent":[3,"double",0,0],"tail_indent":[4,"double",0,0],"line_height_multiple":[5,"double",0,0],"maximum_line_height":[6,"double",0,0],"minimum_line_height":[7,"double",0,0],"line_spacing":[8,"double",0,0],"paragraph_spacing":[9,"double",0,0],"paragraph_spacing_before":[10,"double",0,0],"tab_stops":[11,"Graphics.Text.Attributes.Paragraph.TabStop",1,0],"default_tab_interval":[12,"double",0,0],"text_list":[13,"Graphics.Text.Attributes.Paragraph.TextList",0,0],"text_lists":[14,"Graphics.Text.Attributes.Paragraph.TextList",1,0]},"Graphics.Text.Attributes.Paragraph.TabStop":{"location":[1,"double",0,0],"alignment":[2,"Graphics.Text.Attributes.Alignment",0,0]},"Graphics.Text.Attributes.Paragraph.TextList":{"is_enabled":[1,"bool",0,0],"number_type":[2,"Graphics.Text.Attributes.Paragraph.TextList.NumberType",0,0],"prefix":[3,"string",0,0],"postfix":[4,"string",0,0],"starting_number":[5,"int32",0,0]},"Graphics.Text.Attributes.Underline":{"style":[1,"Graphics.Text.Attributes.Underline.Style",0,0],"pattern":[2,"Graphics.Text.Attributes.Underline.Pattern",0,0],"by_word":[3,"bool",0,0]},"Graphics.Text.ChordPro":{"enabled":[1,"bool",0,0],"notation":[2,"Graphics.Text.ChordPro.Notation",0,0],"color":[3,"Color",0,0]},"Graphics.Text.CutOutFill":{},"Graphics.Text.GradientFill":{"gradient":[1,"Graphics.Gradient",0,0],"stretch_to_document_bounds":[2,"bool",0,0]},"Graphics.Text.LineFillMask":{"enabled":[1,"bool",0,0],"height_offset":[2,"double",0,0],"vertical_offset":[3,"double",0,0],"mask_style":[4,"Graphics.Text.LineFillMask.LineMaskStyle",0,0],"width_offset":[5,"double",0,0],"horizontal_offset":[6,"double",0,0]},"Graphics.Text.MediaFill":{"media":[1,"Media",0,0]},"Group":{"uuid":[1,"UUID",0,0],"name":[2,"string",0,0],"color":[3,"Color",0,0],"hotKey":[4,"HotKey",0,0],"application_group_identifier":[5,"UUID",0,0],"application_group_name":[6,"string",0,0]},"HotKey":{"code":[1,"KeyCode",0,0],"control_identifier":[2,"string",0,0]},"IntRange":{"start":[1,"int32",0,0],"end":[2,"int32",0,0]},"Layer.Blending":{"standard":[1,"Layer.Blending.Standard",0,"BlendingType"],"matte":[2,"Layer.Blending.Matte",0,"BlendingType"]},"Layer.Blending.Matte":{"alpha":[1,"Layer.Blending.Matte.Alpha",0,"MatteType"],"luma":[2,"Layer.Blending.Matte.Luma",0,"MatteType"],"white":[4,"Layer.Blending.Matte.White",0,"MatteType"]},"Layer.Blending.Matte.Alpha":{"inverted":[1,"bool",0,0]},"Layer.Blending.Matte.Luma":{"inverted":[1,"bool",0,0]},"Layer.Blending.Matte.White":{},"Layer.Blending.Standard":{"mode":[1,"Layer.BlendMode",0,0],"opacity":[2,"double",0,0]},"Media":{"uuid":[1,"UUID",0,0],"url":[2,"URL",0,0],"metadata":[3,"Media.Metadata",0,0],"audio":[4,"Media.AudioTypeProperties",0,"TypeProperties"],"image":[5,"Media.ImageTypeProperties",0,"TypeProperties"],"video":[6,"Media.VideoTypeProperties",0,"TypeProperties"],"live_video":[7,"Media.LiveVideoTypeProperties",0,"TypeProperties"],"web_content":[8,"Media.WebContentTypeProperties",0,"TypeProperties"]},"Media.Audio.Channel":{"index":[1,"uint32",0,0],"muted":[2,"bool",0,0],"volume":[3,"double",0,0],"compress_limit":[4,"bool",0,0],"outputs":[5,"Media.Audio.Channel.Output",1,0]},"Media.Audio.Channel.Output":{"channel_index":[2,"int32",0,0]},"Media.AudioDevice":{"name":[1,"string",0,0],"unique_id":[2,"string",0,0],"model_id":[3,"string",0,0],"channel_count":[4,"uint32",0,0]},"Media.AudioProperties":{"volume":[1,"double",0,0],"audio_channels":[2,"Media.Audio.Channel",1,0],"is_custom_mapping":[3,"bool",0,0]},"Media.AudioTypeProperties":{"audio":[1,"Media.AudioProperties",0,0],"transport":[2,"Media.TransportProperties",0,0],"file":[3,"FileProperties",0,0]},"Media.DrawingProperties":{"scale_behavior":[1,"Media.ScaleBehavior",0,0],"is_blurred":[16,"bool",0,0],"scale_alignment":[2,"Media.ScaleAlignment",0,0],"flipped_horizontally":[3,"bool",0,0],"flipped_vertically":[4,"bool",0,0],"natural_size":[5,"Graphics.Size",0,0],"custom_image_rotation":[6,"double",0,0],"custom_image_bounds":[7,"Graphics.Rect",0,0],"custom_image_aspect_locked":[8,"bool",0,0],"alpha_inverted":[9,"bool",0,0],"native_rotation":[10,"Media.DrawingProperties.NativeRotationType",0,0],"selected_effect_preset_uuid":[11,"UUID",0,0],"effects":[12,"Effect",1,0],"crop_enable":[13,"bool",0,0],"crop_insets":[14,"Graphics.EdgeInsets",0,0],"alpha_type":[15,"AlphaType",0,0]},"Media.ImageTypeProperties":{"drawing":[1,"Media.DrawingProperties",0,0],"file":[2,"FileProperties",0,0]},"Media.LiveVideoProperties":{"video_device":[1,"Media.VideoDevice",0,0],"audio_device":[2,"Media.AudioDevice",0,0],"live_video_index":[3,"int32",0,0]},"Media.LiveVideoTypeProperties":{"drawing":[1,"Media.DrawingProperties",0,0],"audio":[2,"Media.AudioProperties",0,0],"live_video":[3,"Media.LiveVideoProperties",0,0]},"Media.Metadata":{"manufacture_name":[1,"string",0,0],"manufacture_url":[2,"URL",0,0],"information":[3,"string",0,0],"artist":[4,"string",0,0],"format":[5,"string",0,0]},"Media.TransportProperties":{"play_rate":[1,"double",0,0],"in_point":[2,"double",0,0],"out_point":[3,"double",0,0],"fade_in_duration":[7,"double",0,0],"fade_out_duration":[8,"double",0,0],"should_fade_in":[9,"bool",0,0],"should_fade_out":[10,"bool",0,0],"end_point":[11,"double",0,0],"playback_behavior":[12,"Media.TransportProperties.PlaybackBehavior",0,0],"loop_time":[13,"double",0,0],"times_to_loop":[14,"uint32",0,0],"retrigger":[15,"Media.TransportProperties.RetriggerSetting",0,0]},"Media.VideoDevice":{"type":[1,"Media.VideoDevice.Type",0,0],"name":[2,"string",0,0],"unique_id":[3,"string",0,0],"model_id":[4,"string",0,0],"format_index":[5,"uint32",0,0],"audio_routing":[6,"DigitalAudio.Device.Routing",0,0]},"Media.VideoProperties":{"frame_rate":[1,"double",0,0],"field_type":[2,"Media.VideoProperties.FieldType",0,0],"thumbnail_position":[3,"double",0,0],"end_behavior":[4,"Media.VideoProperties.EndBehavior",0,0],"soft_loop":[5,"bool",0,0],"soft_loop_duration":[6,"double",0,0]},"Media.VideoTypeProperties":{"drawing":[1,"Media.DrawingProperties",0,0],"audio":[2,"Media.AudioProperties",0,0],"transport":[3,"Media.TransportProperties",0,0],"video":[4,"Media.VideoProperties",0,0],"file":[5,"FileProperties",0,0]},"Media.WebContentTypeProperties":{"drawing":[1,"Media.DrawingProperties",0,0],"url":[2,"URL",0,0]},"Message.TokenValue":{"token_id":[1,"UUID",0,0],"token_name":[5,"string",0,0],"text":[2,"Message.TokenValue.TokenValueText",0,"TokenValueType"],"timer":[3,"Message.TokenValue.TokenValueTimer",0,"TokenValueType"],"clock":[4,"Message.TokenValue.TokenValueClock",0,"TokenValueType"]},"Message.TokenValue.TokenValueClock":{"format":[1,"Clock.Format",0,0]},"Message.TokenValue.TokenValueText":{"value":[1,"string",0,0]},"Message.TokenValue.TokenValueTimer":{"configuration":[1,"Timer.Configuration",0,0],"format":[2,"Timer.Format",0,0]},"MusicKeyScale":{"music_key":[1,"MusicKeyScale.MusicKey",0,0],"music_scale":[2,"MusicKeyScale.MusicScale",0,0]},"Presentation":{"application_info":[1,"ApplicationInfo",0,0],"uuid":[2,"UUID",0,0],"name":[3,"string",0,0],"last_date_used":[4,"Timestamp",0,0],"last_modified_date":[5,"Timestamp",0,0],"category":[6,"string",0,0],"notes":[7,"string",0,0],"background":[8,"Background",0,0],"chord_chart":[9,"URL",0,0],"selected_arrangement":[10,"UUID",0,0],"arrangements":[11,"Presentation.Arrangement",1,0],"cue_groups":[12,"Presentation.CueGroup",1,0],"cues":[13,"Cue",1,0],"ccli":[14,"Presentation.CCLI",0,0],"bible_reference":[15,"Presentation.BibleReference",0,0],"timeline":[17,"Presentation.Timeline",0,0],"transition":[18,"Transition",0,0],"content_destination":[19,"Action.ContentDestination",0,0],"multi_tracks_licensing":[21,"Presentation.MultiTracksLicensing",0,0],"music_key":[22,"string",0,0],"music":[23,"Presentation.Music",0,0],"slide_show_duration":[20,"double",0,"SlideShow"]},"Presentation.Arrangement":{"uuid":[1,"UUID",0,0],"name":[2,"string",0,0],"group_identifiers":[3,"UUID",1,0]},"Presentation.BibleReference":{"book_index":[1,"uint32",0,0],"book_name":[2,"string",0,0],"chapter_range":[3,"IntRange",0,0],"verse_range":[4,"IntRange",0,0],"translation_name":[5,"string",0,0],"translation_display_abbreviation":[6,"string",0,0],"translation_internal_abbreviation":[7,"string",0,0],"book_key":[8,"string",0,0]},"Presentation.CCLI":{"author":[1,"string",0,0],"artist_credits":[2,"string",0,0],"song_title":[3,"string",0,0],"publisher":[4,"string",0,0],"copyright_year":[5,"uint32",0,0],"song_number":[6,"uint32",0,0],"display":[7,"bool",0,0],"album":[8,"string",0,0],"artwork":[9,"bytes",0,0]},"Presentation.CueGroup":{"group":[1,"Group",0,0],"cue_identifiers":[2,"UUID",1,0]},"Presentation.MultiTracksLicensing":{"song_identifier":[1,"int64",0,0],"customer_identifier":[2,"string",0,0],"expiration_date":[3,"Timestamp",0,0],"license_expiration":[4,"Timestamp",0,0],"subscription":[5,"Presentation.MultiTracksLicensing.Subscription",0,0]},"Presentation.Music":{"original_music_key":[1,"string",0,0],"user_music_key":[2,"string",0,0],"original":[3,"MusicKeyScale",0,0],"user":[4,"MusicKeyScale",0,0]},"Presentation.Timeline":{"cues":[1,"Presentation.Timeline.Cue",1,0],"duration":[5,"double",0,0],"loop":[6,"bool",0,0],"audio_action":[8,"Action",0,0],"timecode_enable":[9,"bool",0,0],"timecode_offset":[10,"double",0,0],"cues_v2":[11,"Presentation.Timeline.Cue",1,0]},"Presentation.Timeline.Cue":{"trigger_time":[1,"double",0,0],"name":[3,"string",0,0],"cue_id":[2,"UUID",0,"trigger_info"],"action":[4,"Action",0,"trigger_info"]},"PresentationSlide":{"base_slide":[1,"Slide",0,0],"notes":[2,"PresentationSlide.Notes",0,0],"template_guidelines":[3,"AlignmentGuide",1,0],"chord_chart":[4,"URL",0,0],"transition":[5,"Transition",0,0]},"PresentationSlide.Notes":{"rtf_data":[1,"bytes",0,0],"attributes":[2,"Graphics.Text.Attributes",0,0]},"PropSlide":{"base_slide":[1,"Slide",0,0],"transition":[2,"Transition",0,0]},"Slide":{"elements":[1,"Slide.Element",1,0],"element_build_order":[2,"UUID",1,0],"guidelines":[3,"AlignmentGuide",1,0],"draws_background_color":[4,"bool",0,0],"background_color":[5,"Color",0,0],"size":[6,"Graphics.Size",0,0],"uuid":[7,"UUID",0,0]},"Slide.Element":{"element":[1,"Graphics.Element",0,0],"build_in":[2,"Slide.Element.Build",0,0],"build_out":[3,"Slide.Element.Build",0,0],"info":[4,"uint32",0,0],"reveal_type":[5,"Slide.Element.TextRevealType",0,0],"data_links":[6,"Slide.Element.DataLink",1,0],"childBuilds":[7,"Slide.Element.ChildBuild",1,0],"reveal_from_index":[8,"uint32",0,0],"text_scroller":[9,"Slide.Element.TextScroller",0,0]},"Slide.Element.Build":{"uuid":[1,"UUID",0,0],"elementUUID":[2,"UUID",0,0],"start":[3,"Slide.Element.Build.Start",0,0],"delayTime":[4,"double",0,0],"transition":[5,"Transition",0,0]},"Slide.Element.ChildBuild":{"uuid":[1,"UUID",0,0],"start":[2,"Slide.Element.Build.Start",0,0],"delayTime":[3,"double",0,0],"index":[4,"uint32",0,0]},"Slide.Element.DataLink":{"ticker":[1,"Slide.Element.DataLink.Ticker",0,"PropertyType"],"alternate_text":[2,"Slide.Element.DataLink.AlternateElementText",0,"PropertyType"],"timer_text":[3,"Slide.Element.DataLink.TimerText",0,"PropertyType"],"clock_text":[4,"Slide.Element.DataLink.ClockText",0,"PropertyType"],"chord_chart":[5,"Slide.Element.DataLink.ChordChart",0,"PropertyType"],"output_screen":[6,"Slide.Element.DataLink.OutputScreen",0,"PropertyType"],"pco_live":[7,"Slide.Element.DataLink.PCOLive",0,"PropertyType"],"alternate_fill":[8,"Slide.Element.DataLink.AlternateElementFill",0,"PropertyType"],"visibility_link":[9,"Slide.Element.DataLink.VisibilityLink",0,"PropertyType"],"slide_text":[10,"Slide.Element.DataLink.SlideText",0,"PropertyType"],"stage_message":[11,"Slide.Element.DataLink.StageMessage",0,"PropertyType"],"video_countdown":[12,"Slide.Element.DataLink.VideoCountdown",0,"PropertyType"],"slide_image":[13,"Slide.Element.DataLink.SlideImage",0,"PropertyType"],"ccli_text":[14,"Slide.Element.DataLink.CCLIText",0,"PropertyType"],"group_name":[15,"Slide.Element.DataLink.GroupName",0,"PropertyType"],"group_color":[16,"Slide.Element.DataLink.GroupColor",0,"PropertyType"],"presentation_notes":[17,"Slide.Element.DataLink.PresentationNotes",0,"PropertyType"],"playlist_item":[18,"Slide.Element.DataLink.PlaylistItem",0,"PropertyType"],"auto_advance_time_remaining":[19,"Slide.Element.DataLink.AutoAdvanceTimeRemaining",0,"PropertyType"],"capture_status_text":[20,"Slide.Element.DataLink.CaptureStatusText",0,"PropertyType"],"capture_status_color":[21,"Slide.Element.DataLink.CaptureStatusColor",0,"PropertyType"],"slide_count":[22,"Slide.Element.DataLink.SlideCount",0,"PropertyType"],"audio_countdown":[23,"Slide.Element.DataLink.AudioCountdown",0,"PropertyType"],"presentation":[24,"Slide.Element.DataLink.Presentation",0,"PropertyType"],"slide_Label_Text":[25,"Slide.Element.DataLink.SlideLabelText",0,"PropertyType"],"slide_Label_Color":[26,"Slide.Element.DataLink.SlideLabelColor",0,"PropertyType"],"rss_feed":[27,"Slide.Element.DataLink.RSSFeed",0,"PropertyType"],"file_feed":[28,"Slide.Element.DataLink.FileFeed",0,"PropertyType"],"chord_pro_chart":[29,"Slide.Element.DataLink.ChordProChart",0,"PropertyType"],"playback_marker_text":[30,"Slide.Element.DataLink.PlaybackMarkerText",0,"PropertyType"],"playback_marker_color":[32,"Slide.Element.DataLink.PlaybackMarkerIdentifier",0,"PropertyType"],"timecode_text":[33,"Slide.Element.DataLink.TimecodeText",0,"PropertyType"],"timecode_status":[34,"Slide.Element.DataLink.TimecodeStatus",0,"PropertyType"]},"Slide.Element.DataLink.AlternateElementFill":{"other_element_uuid":[1,"UUID",0,0],"other_element_name":[2,"string",0,0]},"Slide.Element.DataLink.AlternateElementText":{"other_element_uuid":[1,"UUID",0,0],"other_element_name":[2,"string",0,0],"text_transform_options":[3,"uint32",0,0],"text_transform":[4,"Slide.Element.DataLink.AlternateElementText.TextTransformOption",0,0]},"Slide.Element.DataLink.AudioCountdown":{"timer_format":[1,"Timer.Format",0,0],"timer_format_string":[2,"string",0,0],"color_triggers":[3,"Slide.Element.DataLink.ColorTrigger",1,0],"ignore_looping_audio":[4,"bool",0,0]},"Slide.Element.DataLink.AutoAdvanceTimeRemaining":{"auto_advance_source":[1,"Slide.Element.DataLink.AutoAdvanceTimeRemaining.AutoAdvanceSource",0,0],"timer_format":[2,"Timer.Format",0,0]},"Slide.Element.DataLink.CCLIText":{},"Slide.Element.DataLink.CaptureStatusColor":{},"Slide.Element.DataLink.CaptureStatusText":{"status_text":[1,"Slide.Element.DataLink.CaptureStatusText.StatusText",0,"TextType"],"elapsed_time":[2,"Slide.Element.DataLink.CaptureStatusText.ElapsedTime",0,"TextType"]},"Slide.Element.DataLink.CaptureStatusText.ElapsedTime":{"timer_format":[1,"Timer.Format",0,0]},"Slide.Element.DataLink.CaptureStatusText.StatusText":{},"Slide.Element.DataLink.ChordChart":{},"Slide.Element.DataLink.ChordProChart":{},"Slide.Element.DataLink.ClockText":{"clock_format_string":[1,"string",0,0],"format":[5,"Clock.Format",0,0]},"Slide.Element.DataLink.ColorTrigger":{"time":[1,"double",0,0],"color":[2,"Color",0,0]},"Slide.Element.DataLink.FileFeed":{"url":[1,"URL",0,0]},"Slide.Element.DataLink.GroupColor":{"groupSource":[1,"Slide.Element.DataLink.GroupSourceType",0,0]},"Slide.Element.DataLink.GroupName":{"groupSource":[1,"Slide.Element.DataLink.GroupSourceType",0,0]},"Slide.Element.DataLink.OutputScreen":{"screen_id":[1,"UUID",0,0],"screen_name":[2,"string",0,0]},"Slide.Element.DataLink.PCOLive":{"theme":[2,"Slide.Element.DataLink.PCOLive.Theme",0,0],"countdown_type":[3,"Slide.Element.DataLink.PCOLive.CountdownType",0,0]},"Slide.Element.DataLink.PlaybackMarkerIdentifier":{"destination":[1,"Slide.Element.DataLink.PlaybackMarkerIdentifier.Destination",0,0],"type":[2,"Slide.Element.DataLink.PlaybackMarkerIdentifier.Type",0,0],"name":[3,"string",0,0]},"Slide.Element.DataLink.PlaybackMarkerText":{"identifier":[1,"Slide.Element.DataLink.PlaybackMarkerIdentifier",0,0],"should_use_marker_color":[4,"bool",0,0],"name":[2,"Slide.Element.DataLink.PlaybackMarkerText.Name",0,"TextType"],"time":[3,"Slide.Element.DataLink.PlaybackMarkerText.Time",0,"TextType"]},"Slide.Element.DataLink.PlaybackMarkerText.Name":{},"Slide.Element.DataLink.PlaybackMarkerText.Time":{"format":[1,"Timer.Format",0,0]},"Slide.Element.DataLink.PlaylistItem":{"playlistItemSource":[1,"Slide.Element.DataLink.PlaylistItem.PlaylistItemSourceType",0,0],"showArrangement":[2,"bool",0,0]},"Slide.Element.DataLink.Presentation":{"presentation_source":[1,"Slide.Element.DataLink.Presentation.PresentationSource",0,0]},"Slide.Element.DataLink.PresentationNotes":{},"Slide.Element.DataLink.RSSFeed":{"url":[1,"URL",0,0],"content":[2,"Slide.Element.DataLink.RSSFeed.ContentType",0,0],"text_delimiter":[3,"string",0,0]},"Slide.Element.DataLink.SlideCount":{"slideCountSourceType":[1,"Slide.Element.DataLink.SlideCount.SlideCountSourceType",0,0]},"Slide.Element.DataLink.SlideImage":{"source_slide":[1,"Slide.Element.DataLink.SlideSourceType",0,0]},"Slide.Element.DataLink.SlideLabelColor":{"slide_label_source":[1,"Slide.Element.DataLink.SlideLabelSource",0,0]},"Slide.Element.DataLink.SlideLabelText":{"slide_label_source":[1,"Slide.Element.DataLink.SlideLabelSource",0,0]},"Slide.Element.DataLink.SlideText":{"source_slide":[1,"Slide.Element.DataLink.SlideSourceType",0,0],"source_option":[2,"Slide.Element.DataLink.SlideText.TextSourceOption",0,0],"preserve_notes_format":[3,"bool",0,0],"name_to_match":[4,"string",0,0],"element_text_transform":[5,"Slide.Element.DataLink.AlternateElementText.TextTransformOption",0,0]},"Slide.Element.DataLink.StageMessage":{"should_flash":[1,"bool",0,0],"flash_color":[2,"Color",0,0]},"Slide.Element.DataLink.Ticker":{"play_rate":[4,"double",0,0],"should_loop":[5,"bool",0,0],"loop_delay":[6,"double",0,0],"text_delimiter":[7,"string",0,0],"text_type":[1,"Slide.Element.DataLink.Ticker.TextType",0,"SourceType"],"rss_type":[2,"Slide.Element.DataLink.Ticker.RSSType",0,"SourceType"],"file_type":[3,"Slide.Element.DataLink.Ticker.FileType",0,"SourceType"]},"Slide.Element.DataLink.Ticker.FileType":{"url":[1,"URL",0,0]},"Slide.Element.DataLink.Ticker.RSSType":{"url":[1,"URL",0,0],"content":[2,"Slide.Element.DataLink.Ticker.RSSType.ContentType",0,0]},"Slide.Element.DataLink.Ticker.TextType":{"text":[1,"string",0,0]},"Slide.Element.DataLink.TimecodeStatus":{},"Slide.Element.DataLink.TimecodeText":{},"Slide.Element.DataLink.TimerText":{"timer_uuid":[1,"UUID",0,0],"timer_name":[2,"string",0,0],"timer_format":[3,"Timer.Format",0,0],"timer_format_string":[4,"string",0,0],"color_triggers":[5,"Slide.Element.DataLink.ColorTrigger",1,0]},"Slide.Element.DataLink.VideoCountdown":{"timer_format":[1,"Timer.Format",0,0],"timer_format_string":[2,"string",0,0],"color_triggers":[3,"Slide.Element.DataLink.ColorTrigger",1,0],"ignore_looping_videos":[4,"bool",0,0],"video_countdown_source":[5,"Slide.Element.DataLink.VideoCountdown.VideoCountdownSource",0,0]},"Slide.Element.DataLink.VisibilityLink":{"visibility_criterion":[1,"Slide.Element.DataLink.VisibilityLink.VisibilityCriterion",0,0],"conditions":[2,"Slide.Element.DataLink.VisibilityLink.Condition",1,0]},"Slide.Element.DataLink.VisibilityLink.Condition":{"element_visibility":[1,"Slide.Element.DataLink.VisibilityLink.Condition.ElementVisibility",0,"ConditionType"],"timer_visibility":[2,"Slide.Element.DataLink.VisibilityLink.Condition.TimerVisibility",0,"ConditionType"],"video_countdown_visibility":[3,"Slide.Element.DataLink.VisibilityLink.Condition.VideoCountdownVisibility",0,"ConditionType"],"capture_session_visibility":[4,"Slide.Element.DataLink.VisibilityLink.Condition.CaptureSessionVisibility",0,"ConditionType"],"video_input_visibility":[5,"Slide.Element.DataLink.VisibilityLink.Condition.VideoInputVisibility",0,"ConditionType"],"audio_countdown_visibility":[6,"Slide.Element.DataLink.VisibilityLink.Condition.AudioCountdownVisibility",0,"ConditionType"]},"Slide.Element.DataLink.VisibilityLink.Condition.AudioCountdownVisibility":{"visibility_criterion":[1,"Slide.Element.DataLink.VisibilityLink.Condition.AudioCountdownVisibility.AudioCountdownVisibilityCriterion",0,0]},"Slide.Element.DataLink.VisibilityLink.Condition.CaptureSessionVisibility":{"visibility_criterion":[1,"Slide.Element.DataLink.VisibilityLink.Condition.CaptureSessionVisibility.CaptureSessionVisibilityCriterion",0,0]},"Slide.Element.DataLink.VisibilityLink.Condition.ElementVisibility":{"other_element_uuid":[1,"UUID",0,0],"other_element_name":[2,"string",0,0],"visibility_criterion":[3,"Slide.Element.DataLink.VisibilityLink.Condition.ElementVisibility.ElementVisibilityCriterion",0,0]},"Slide.Element.DataLink.VisibilityLink.Condition.TimerVisibility":{"timer_uuid":[1,"UUID",0,0],"timer_name":[2,"string",0,0],"visibility_criterion":[3,"Slide.Element.DataLink.VisibilityLink.Condition.TimerVisibility.TimerVisibilityCriterion",0,0]},"Slide.Element.DataLink.VisibilityLink.Condition.VideoCountdownVisibility":{"visibility_criterion":[1,"Slide.Element.DataLink.VisibilityLink.Condition.VideoCountdownVisibility.VideoCountdownVisibilityCriterion",0,0]},"Slide.Element.DataLink.VisibilityLink.Condition.VideoInputVisibility":{"video_input_index":[1,"int32",0,0],"visibility_criterion":[2,"Slide.Element.DataLink.VisibilityLink.Condition.VideoInputVisibility.VideoInputVisibilityCriterion",0,0]},"Slide.Element.TextScroller":{"should_scroll":[1,"bool",0,0],"scroll_rate":[2,"double",0,0],"should_repeat":[3,"bool",0,0],"repeat_distance":[4,"double",0,0],"scrolling_direction":[5,"Slide.Element.TextScroller.Direction",0,0],"starts_off_screen":[6,"bool",0,0],"fade_left":[7,"double",0,0],"fade_right":[8,"double",0,0]},"Stage.ScreenAssignment":{"screen":[1,"CollectionElementType",0,0],"layout":[2,"CollectionElementType",0,0]},"Timer.Configuration":{"allows_overrun":[4,"bool",0,0],"countdown":[1,"Timer.Configuration.TimerTypeCountdown",0,"TimerType"],"countdown_to_time":[2,"Timer.Configuration.TimerTypeCountdownToTime",0,"TimerType"],"elapsed_time":[3,"Timer.Configuration.TimerTypeElapsedTime",0,"TimerType"]},"Timer.Configuration.TimerTypeCountdown":{"duration":[1,"double",0,0]},"Timer.Configuration.TimerTypeCountdownToTime":{"time_of_day":[1,"double",0,0],"period":[2,"Timer.Configuration.TimerTypeCountdownToTime.TimePeriod",0,0]},"Timer.Configuration.TimerTypeElapsedTime":{"start_time":[1,"double",0,0],"end_time":[2,"double",0,0],"has_end_time":[3,"bool",0,0]},"Timer.Format":{"hour":[1,"Timer.Format.Style",0,0],"minute":[2,"Timer.Format.Style",0,0],"second":[3,"Timer.Format.Style",0,0],"millisecond":[4,"Timer.Format.Style",0,0],"is_wall_clock_time":[5,"bool",0,0],"is_24_hour_time":[6,"bool",0,0],"show_milliseconds_under_minute_only":[7,"bool",0,0]},"Timestamp":{"seconds":[1,"int64",0,0],"nanos":[2,"int32",0,0]},"Transition":{"duration":[1,"double",0,0],"favorite_uuid":[2,"UUID",0,0],"effect":[3,"Effect",0,0]},"URL":{"platform":[3,"URL.Platform",0,0],"absolute_string":[1,"string",0,"Storage"],"relative_path":[2,"string",0,"Storage"],"local":[4,"URL.LocalRelativePath",0,"RelativeFilePath"],"external":[5,"URL.ExternalRelativePath",0,"RelativeFilePath"]},"URL.ExternalRelativePath":{"macos":[1,"URL.ExternalRelativePath.MacOSExternalVolume",0,0],"win32":[2,"URL.ExternalRelativePath.Win32ExternalVolume",0,0],"path":[3,"string",0,0]},"URL.ExternalRelativePath.MacOSExternalVolume":{"volume_name":[1,"string",0,0]},"URL.ExternalRelativePath.Win32ExternalVolume":{"drive_letter":[1,"string",0,0],"volume_name":[2,"string",0,0],"network_share":[3,"bool",0,0]},"URL.LocalRelativePath":{"root":[1,"URL.LocalRelativePath.Root",0,0],"path":[2,"string",0,0]},"URLs":{"urls":[1,"URL",1,0]},"UUID":{"string":[1,"string",0,0]},"Version":{"major_version":[1,"uint32",0,0],"minor_version":[2,"uint32",0,0],"patch_version":[3,"uint32",0,0],"build":[4,"string",0,0]}},"e":{"Action.ActionType":{"ACTION_TYPE_UNKNOWN":0,"ACTION_TYPE_STAGE_LAYOUT":1,"ACTION_TYPE_MEDIA":2,"ACTION_TYPE_TIMER":3,"ACTION_TYPE_COMMUNICATION":4,"ACTION_TYPE_CLEAR":5,"ACTION_TYPE_PROP":6,"ACTION_TYPE_MASK":7,"ACTION_TYPE_MESSAGE":8,"ACTION_TYPE_SOCIAL_MEDIA":9,"ACTION_TYPE_MULTISCREEN":10,"ACTION_TYPE_PRESENTATION_SLIDE":11,"ACTION_TYPE_FOREGROUND_MEDIA":12,"ACTION_TYPE_BACKGROUND_MEDIA":13,"ACTION_TYPE_PRESENTATION_DOCUMENT":14,"ACTION_TYPE_PROP_SLIDE":15,"ACTION_TYPE_EXTERNAL_PRESENTATION":17,"ACTION_TYPE_AUDIENCE_LOOK":18,"ACTION_TYPE_AUDIO_INPUT":19,"ACTION_TYPE_AUDIO_BIN_PLAYLIST":20,"ACTION_TYPE_MEDIA_BIN_PLAYLIST":21,"ACTION_TYPE_SLIDE_DESTINATION":22,"ACTION_TYPE_MACRO":23,"ACTION_TYPE_CLEAR_GROUP":24,"ACTION_TYPE_CAPTURE":25,"ACTION_TYPE_LIBRARY_PLAYLIST":26},"Action.ClearType.ClearTargetLayer":{"CLEAR_TARGET_LAYER_ALL":0,"CLEAR_TARGET_LAYER_AUDIO":1,"CLEAR_TARGET_LAYER_BACKGROUND":2,"CLEAR_TARGET_LAYER_LIVE_VIDEO":3,"CLEAR_TARGET_LAYER_PROP":4,"CLEAR_TARGET_LAYER_SLIDE":5,"CLEAR_TARGET_LAYER_LOGO":6,"CLEAR_TARGET_LAYER_MESSAGES":7,"CLEAR_TARGET_LAYER_AUDIO_EFFECTS":8},"Action.CommunicationType.GVG100Command.CommandAction":{"COMMAND_ACTION_FADE_TO_BLACK":0,"COMMAND_ACTION_DSK_TOGGLE":1},"Action.CommunicationType.GlobalCacheCommand.CommandAction":{"COMMAND_ACTION_ON":0,"COMMAND_ACTION_OFF":1,"COMMAND_ACTION_ON_OFF_WITH_INTERVAL":2,"COMMAND_ACTION_OFF_ON_WITH_INTERVAL":3},"Action.CommunicationType.MIDICommand.State":{"STATE_ON":0,"STATE_OFF":1},"Action.CommunicationType.SonyBVSCommand.CommandAction":{"COMMAND_ACTION_FADE_TO_BLACK":0,"COMMAND_ACTION_KEY_ON":1,"COMMAND_ACTION_KEY_OFF":2,"COMMAND_ACTION_DSK_ON":3,"COMMAND_ACTION_DSK_OFF":4},"Action.ContentDestination":{"CONTENT_DESTINATION_GLOBAL":0,"CONTENT_DESTINATION_ANNOUNCEMENTS":1},"Action.LayerType":{"LAYER_TYPE_BACKGROUND":0,"LAYER_TYPE_FOREGROUND":1,"LAYER_TYPE_FILL":2,"LAYER_TYPE_INPUT":3},"Action.MediaType.Audio.MediaActionAudioType":{"MEDIA_ACTION_AUDIO_TYPE_TUNE":0,"MEDIA_ACTION_AUDIO_TYPE_SOUND":1},"Action.MediaType.EndBehavior":{"END_BEHAVIOR_STOP":0,"END_BEHAVIOR_STOP_ON_BLACK":1,"END_BEHAVIOR_STOP_ON_CLEAR":2,"END_BEHAVIOR_FADE_TO_BLACK":3,"END_BEHAVIOR_FADE_TO_CLEAR":4},"Action.MediaType.PlaybackBehavior":{"PLAYBACK_BEHAVIOR_STOP":0,"PLAYBACK_BEHAVIOR_LOOP":1,"PLAYBACK_BEHAVIOR_LOOP_FOR_COUNT":2,"PLAYBACK_BEHAVIOR_LOOP_FOR_TIME":3},"Action.OldType.Category":{"CATEGORY_UNKNOWN":0,"CATEGORY_MEDIA":1,"CATEGORY_APPLICATION":2},"Action.StageLayoutType.SlideTarget":{"SLIDE_TARGET_NO_CHANGE":0,"SLIDE_TARGET_STAGE_ONLY":1,"SLIDE_TARGET_ALL":2},"Action.TimerType.TimerAction":{"ACTION_START":0,"ACTION_STOP":1,"ACTION_RESET":2,"ACTION_RESET_AND_START":3,"ACTION_STOP_AND_RESET":4,"ACTION_INCREMENT":5},"AlignmentGuide.GuidelineOrientation":{"GUIDELINE_ORIENTATION_HORIZONTAL":0,"GUIDELINE_ORIENTATION_VERTICAL":1},"AlphaType":{"ALPHA_TYPE_UNKNOWN":0,"ALPHA_TYPE_STRAIGHT":1,"ALPHA_TYPE_PREMULTIPLIED":2},"ApplicationInfo.Application":{"APPLICATION_UNDEFINED":0,"APPLICATION_PROPRESENTER":1,"APPLICATION_PVP":2,"APPLICATION_PROVIDEOSERVER":3,"APPLICATION_SCOREBOARD":4},"ApplicationInfo.Platform":{"PLATFORM_UNDEFINED":0,"PLATFORM_MACOS":1,"PLATFORM_WINDOWS":2},"Clock.Format.DateFormatterStyle":{"DATE_FORMATTER_STYLE_NONE":0,"DATE_FORMATTER_STYLE_SHORT":1,"DATE_FORMATTER_STYLE_MEDIUM":2,"DATE_FORMATTER_STYLE_LONG":3,"DATE_FORMATTER_STYLE_FULL":4},"Cue.CompletionActionType":{"COMPLETION_ACTION_TYPE_FIRST":0,"COMPLETION_ACTION_TYPE_LAST":1,"COMPLETION_ACTION_TYPE_AFTER_ACTION":2,"COMPLETION_ACTION_TYPE_AFTER_TIME":3},"Cue.CompletionTargetType":{"COMPLETION_TARGET_TYPE_NONE":0,"COMPLETION_TARGET_TYPE_NEXT":1,"COMPLETION_TARGET_TYPE_RANDOM":2,"COMPLETION_TARGET_TYPE_CUE":3,"COMPLETION_TARGET_TYPE_FIRST":4},"Effect.EffectVariable.EffectDirection.EffectDirection":{"EFFECT_DIRECTION_NONE":0,"EFFECT_DIRECTION_TOP_LEFT":1,"EFFECT_DIRECTION_TOP":2,"EFFECT_DIRECTION_TOP_RIGHT":4,"EFFECT_DIRECTION_LEFT":8,"EFFECT_DIRECTION_CENTER":16,"EFFECT_DIRECTION_RIGHT":32,"EFFECT_DIRECTION_BOTTOM_LEFT":64,"EFFECT_DIRECTION_BOTTOM":128,"EFFECT_DIRECTION_BOTTOM_RIGHT":256},"Graphics.Element.FlipMode":{"FLIP_MODE_NONE":0,"FLIP_MODE_VERTICAL":1,"FLIP_MODE_HORIZONTAL":2,"FLIP_MODE_BOTH":3},"Graphics.Feather.Style":{"STYLE_INSIDE":0,"STYLE_CENTER":1,"STYLE_OUTSIDE":2},"Graphics.Gradient.Type":{"TYPE_LINEAR":0,"TYPE_RADIAL":1,"TYPE_ANGLE":2},"Graphics.Path.Shape.Type":{"TYPE_UNKNOWN":0,"TYPE_RECTANGLE":1,"TYPE_ELLIPSE":2,"TYPE_ISOSCELES_TRIANGLE":3,"TYPE_RIGHT_TRIANGLE":4,"TYPE_RHOMBUS":5,"TYPE_STAR":6,"TYPE_POLYGON":7,"TYPE_CUSTOM":8,"TYPE_RIGHT_ARROW":9,"TYPE_DOUBLE_ARROW":10,"TYPE_ROUNDED_RECTANGLE":11},"Graphics.Shadow.Style":{"STYLE_DROP":0},"Graphics.Stroke.Style":{"STYLE_SOLID_LINE":0,"STYLE_SQUARE_DASH":1,"STYLE_SHORT_DASH":2,"STYLE_LONG_DASH":3},"Graphics.Text.Attributes.Alignment":{"ALIGNMENT_LEFT":0,"ALIGNMENT_RIGHT":1,"ALIGNMENT_CENTER":2,"ALIGNMENT_JUSTIFIED":3,"ALIGNMENT_NATURAL":4},"Graphics.Text.Attributes.Capitalization":{"CAPITALIZATION_NONE":0,"CAPITALIZATION_ALL_CAPS":1,"CAPITALIZATION_SMALL_CAPS":2,"CAPITALIZATION_TITLE_CASE":3,"CAPITALIZATION_START_CASE":4},"Graphics.Text.Attributes.Paragraph.TextList.NumberType":{"NUMBER_TYPE_BOX":0,"NUMBER_TYPE_CHECK":1,"NUMBER_TYPE_CIRCLE":2,"NUMBER_TYPE_DIAMOND":3,"NUMBER_TYPE_DISC":4,"NUMBER_TYPE_HYPHEN":5,"NUMBER_TYPE_SQUARE":6,"NUMBER_TYPE_DECIMAL":7,"NUMBER_TYPE_LOWERCASE_ALPHA":8,"NUMBER_TYPE_UPPERCASE_ALPHA":9,"NUMBER_TYPE_LOWERCASE_ROMAN":10,"NUMBER_TYPE_UPPERCASE_ROMAN":11},"Graphics.Text.Attributes.Underline.Pattern":{"PATTERN_SOLID":0,"PATTERN_DOT":1,"PATTERN_DASH":2,"PATTERN_DASH_DOT":3,"PATTERN_DASH_DOT_DOT":4},"Graphics.Text.Attributes.Underline.Style":{"STYLE_NONE":0,"STYLE_SINGLE":1,"STYLE_THICK":2,"STYLE_DOUBLE":3},"Graphics.Text.ChordPro.Notation":{"NOTATION_CHORDS":0,"NOTATION_NUMBERS":1,"NOTATION_NUMERALS":2,"NOTATION_DO_RE_MI":3},"Graphics.Text.LineFillMask.LineMaskStyle":{"LINE_MASK_STYLE_FULL_WIDTH":0,"LINE_MASK_STYLE_LINE_WIDTH":1,"LINE_MASK_STYLE_MAX_LINE_WIDTH":2},"Graphics.Text.ScaleBehavior":{"SCALE_BEHAVIOR_NONE":0,"SCALE_BEHAVIOR_ADJUST_CONTAINER_HEIGHT":1,"SCALE_BEHAVIOR_SCALE_FONT_DOWN":2,"SCALE_BEHAVIOR_SCALE_FONT_UP":3,"SCALE_BEHAVIOR_SCALE_FONT_UP_DOWN":4},"Graphics.Text.Transform":{"TRANSFORM_NONE":0,"TRANSFORM_SINGLE_LINE":1,"TRANSFORM_ONE_WORD_PER_LINE":2,"TRANSFORM_ONE_CHARACTER_PER_LINE":3,"TRANSFORM_REPLACE_LINE_RETURNS":4},"Graphics.Text.VerticalAlignment":{"VERTICAL_ALIGNMENT_TOP":0,"VERTICAL_ALIGNMENT_MIDDLE":1,"VERTICAL_ALIGNMENT_BOTTOM":2},"KeyCode":{"KEY_CODE_UNKNOWN":0,"KEY_CODE_ANSI_A":1,"KEY_CODE_ANSI_B":2,"KEY_CODE_ANSI_C":3,"KEY_CODE_ANSI_D":4,"KEY_CODE_ANSI_E":5,"KEY_CODE_ANSI_F":6,"KEY_CODE_ANSI_G":7,"KEY_CODE_ANSI_H":8,"KEY_CODE_ANSI_I":9,"KEY_CODE_ANSI_J":10,"KEY_CODE_ANSI_K":11,"KEY_CODE_ANSI_L":12,"KEY_CODE_ANSI_M":13,"KEY_CODE_ANSI_N":14,"KEY_CODE_ANSI_O":15,"KEY_CODE_ANSI_P":16,"KEY_CODE_ANSI_Q":17,"KEY_CODE_ANSI_R":18,"KEY_CODE_ANSI_S":19,"KEY_CODE_ANSI_T":20,"KEY_CODE_ANSI_U":21,"KEY_CODE_ANSI_V":22,"KEY_CODE_ANSI_W":23,"KEY_CODE_ANSI_X":24,"KEY_CODE_ANSI_Y":25,"KEY_CODE_ANSI_Z":26,"KEY_CODE_ANSI_0":27,"KEY_CODE_ANSI_1":28,"KEY_CODE_ANSI_2":29,"KEY_CODE_ANSI_3":30,"KEY_CODE_ANSI_4":31,"KEY_CODE_ANSI_5":32,"KEY_CODE_ANSI_6":33,"KEY_CODE_ANSI_7":34,"KEY_CODE_ANSI_8":35,"KEY_CODE_ANSI_9":36,"KEY_CODE_ANSI_EQUAL":37,"KEY_CODE_ANSI_MINUS":38,"KEY_CODE_ANSI_RIGHT_BRACKET":39,"KEY_CODE_ANSI_LEFT_BRACKET":40,"KEY_CODE_ANSI_QUOTE":41,"KEY_CODE_ANSI_SEMICOLON":42,"KEY_CODE_ANSI_BACKSLASH":43,"KEY_CODE_ANSI_COMMA":44,"KEY_CODE_ANSI_SLASH":45,"KEY_CODE_ANSI_PERIOD":46,"KEY_CODE_ANSI_GRAVE":47,"KEY_CODE_ANSI_KEYPAD_DECIMAL":48,"KEY_CODE_ANSI_KEYPAD_PLUS":49,"KEY_CODE_ANSI_KEYPAD_CLEAR":50,"KEY_CODE_ANSI_KEYPAD_DIVIDE":51,"KEY_CODE_ANSI_KEYPAD_ENTER":52,"KEY_CODE_ANSI_KEYPAD_MINUS":53,"KEY_CODE_ANSI_KEYPAD_EQUALS":54,"KEY_CODE_ANSI_KEYPAD_0":55,"KEY_CODE_ANSI_KEYPAD_1":56,"KEY_CODE_ANSI_KEYPAD_2":57,"KEY_CODE_ANSI_KEYPAD_3":58,"KEY_CODE_ANSI_KEYPAD_4":59,"KEY_CODE_ANSI_KEYPAD_5":60,"KEY_CODE_ANSI_KEYPAD_6":61,"KEY_CODE_ANSI_KEYPAD_7":62,"KEY_CODE_ANSI_KEYPAD_8":63,"KEY_CODE_ANSI_KEYPAD_9":64,"KEY_CODE_F1":65,"KEY_CODE_F2":66,"KEY_CODE_F3":67,"KEY_CODE_F4":68,"KEY_CODE_F5":69,"KEY_CODE_F6":70,"KEY_CODE_F7":71,"KEY_CODE_F8":72,"KEY_CODE_F9":73,"KEY_CODE_F10":74,"KEY_CODE_F11":75,"KEY_CODE_F12":76,"KEY_CODE_F13":77,"KEY_CODE_F14":78,"KEY_CODE_F15":79,"KEY_CODE_F16":80,"KEY_CODE_F17":81,"KEY_CODE_F18":82,"KEY_CODE_F19":83,"KEY_CODE_F20":84,"KEY_CODE_FUNCTION":85,"KEY_CODE_RETURN":86,"KEY_CODE_TAB":87,"KEY_CODE_SPACE":88,"KEY_CODE_DELETE":89,"KEY_CODE_ESCAPE":90,"KEY_CODE_COMMAND":91,"KEY_CODE_SHIFT":92,"KEY_CODE_CAPS_LOCK":93,"KEY_CODE_OPTION":94,"KEY_CODE_CONTROL":95,"KEY_CODE_RIGHT_SHIFT":96,"KEY_CODE_RIGHT_OPTION":97,"KEY_CODE_RIGHT_CONTROL":98,"KEY_CODE_VOLUME_UP":99,"KEY_CODE_VOLUME_DOWN":100,"KEY_CODE_MUTE":101,"KEY_CODE_HELP":102,"KEY_CODE_HOME":103,"KEY_CODE_PAGE_UP":104,"KEY_CODE_FORWARD_DELETE":105,"KEY_CODE_END":106,"KEY_CODE_PAGE_DOWN":107,"KEY_CODE_LEFT_ARROW":108,"KEY_CODE_RIGHT_ARROW":109,"KEY_CODE_DOWN_ARROW":110,"KEY_CODE_UP_ARROW":111,"KEY_CODE_ISO_SELECTION":112,"KEY_CODE_JIS_YEN":113,"KEY_CODE_JIS_UNDERSCORE":114,"KEY_CODE_JIS_KEYPAD_COMMA":115,"KEY_CODE_JIS_EISU":116,"KEY_CODE_JIS_KANA":117},"Layer.BlendMode":{"BLEND_MODE_NORMAL":0,"BLEND_MODE_DISSOLVE":1,"BLEND_MODE_DARKEN":2,"BLEND_MODE_MULTIPLY":3,"BLEND_MODE_COLOR_BURN":4,"BLEND_MODE_LINEAR_BURN":5,"BLEND_MODE_DARKER_COLOR":6,"BLEND_MODE_LIGHTEN":7,"BLEND_MODE_SCREEN":8,"BLEND_MODE_COLOR_DODGE":9,"BLEND_MODE_LINEAR_DODGE":10,"BLEND_MODE_LIGHTER_COLOR":11,"BLEND_MODE_OVERLAY":12,"BLEND_MODE_SOFT_LIGHT":13,"BLEND_MODE_HARD_LIGHT":14,"BLEND_MODE_VIVID_LIGHT":15,"BLEND_MODE_LINEAR_LIGHT":16,"BLEND_MODE_PIN_LIGHT":17,"BLEND_MODE_HARD_MIX":18,"BLEND_MODE_DIFFERENCE":19,"BLEND_MODE_EXCLUSION":20,"BLEND_MODE_SUBTRACT":21,"BLEND_MODE_DIVIDE":22,"BLEND_MODE_HUE":23,"BLEND_MODE_SATURATION":24,"BLEND_MODE_COLOR":25,"BLEND_MODE_LUMINOSITY":26},"Media.DrawingProperties.NativeRotationType":{"NATIVE_ROTATION_TYPE_ROTATE_STANDARD":0,"NATIVE_ROTATION_TYPE_ROTATE_90":90,"NATIVE_ROTATION_TYPE_ROTATE_180":180,"NATIVE_ROTATION_TYPE_ROTATE_270":270},"Media.ScaleAlignment":{"SCALE_ALIGNMENT_MIDDLE_CENTER":0,"SCALE_ALIGNMENT_TOP_LEFT":1,"SCALE_ALIGNMENT_TOP_CENTER":2,"SCALE_ALIGNMENT_TOP_RIGHT":3,"SCALE_ALIGNMENT_MIDDLE_RIGHT":4,"SCALE_ALIGNMENT_BOTTOM_RIGHT":5,"SCALE_ALIGNMENT_BOTTOM_CENTER":6,"SCALE_ALIGNMENT_BOTTOM_LEFT":7,"SCALE_ALIGNMENT_MIDDLE_LEFT":8},"Media.ScaleBehavior":{"SCALE_BEHAVIOR_FIT":0,"SCALE_BEHAVIOR_FILL":1,"SCALE_BEHAVIOR_STRETCH":2,"SCALE_BEHAVIOR_CUSTOM":3},"Media.TransportProperties.PlaybackBehavior":{"PLAYBACK_BEHAVIOR_STOP":0,"PLAYBACK_BEHAVIOR_LOOP":1,"PLAYBACK_BEHAVIOR_LOOP_FOR_COUNT":2,"PLAYBACK_BEHAVIOR_LOOP_FOR_TIME":3},"Media.TransportProperties.RetriggerSetting":{"RETRIGGER_SETTING_UNSET":0,"RETRIGGER_SETTING_ALWAYS":1,"RETRIGGER_SETTING_NEVER":2,"RETRIGGER_SETTING_AUTOMATIC":3},"Media.VideoDevice.Type":{"TYPE_GENERIC":0,"TYPE_DIRECTSHOW":1,"TYPE_BLACKMAGIC":2,"TYPE_AJA":3,"TYPE_AV":4,"TYPE_SYPHON":5,"TYPE_NDI":6,"TYPE_BLUEFISH":7},"Media.VideoProperties.EndBehavior":{"END_BEHAVIOR_STOP":0,"END_BEHAVIOR_STOP_ON_BLACK":1,"END_BEHAVIOR_STOP_ON_CLEAR":2,"END_BEHAVIOR_FADE_TO_BLACK":3,"END_BEHAVIOR_FADE_TO_CLEAR":4},"Media.VideoProperties.FieldType":{"FIELD_TYPE_UNKNOWN":0,"FIELD_TYPE_PROGRESSIVE":1,"FIELD_TYPE_INTERLACED_UPPER_FIRST":2,"FIELD_TYPE_INTERLACED_LOWER_FIRST":3},"MusicKeyScale.MusicKey":{"MUSIC_KEY_A_FLAT":0,"MUSIC_KEY_A":1,"MUSIC_KEY_A_SHARP":2,"MUSIC_KEY_B_FLAT":3,"MUSIC_KEY_B":4,"MUSIC_KEY_B_SHARP":5,"MUSIC_KEY_C_FLAT":6,"MUSIC_KEY_C":7,"MUSIC_KEY_C_SHARP":8,"MUSIC_KEY_D_FLAT":9,"MUSIC_KEY_D":10,"MUSIC_KEY_D_SHARP":11,"MUSIC_KEY_E_FLAT":12,"MUSIC_KEY_E":13,"MUSIC_KEY_E_SHARP":14,"MUSIC_KEY_F_FLAT":15,"MUSIC_KEY_F":16,"MUSIC_KEY_F_SHARP":17,"MUSIC_KEY_G_FLAT":18,"MUSIC_KEY_G":19,"MUSIC_KEY_G_SHARP":20},"MusicKeyScale.MusicScale":{"MUSIC_SCALE_MAJOR":0,"MUSIC_SCALE_MINOR":1},"Presentation.MultiTracksLicensing.Subscription":{"SUBSCRIPTION_CHART_PRO":0,"SUBSCRIPTION_SLIDE_PRO":1},"Slide.Element.Build.Start":{"START_ON_CLICK":0,"START_WITH_PREVIOUS":1,"START_AFTER_PREVIOUS":2,"START_WITH_SLIDE":3},"Slide.Element.DataLink.AlternateElementText.TextTransformOption":{"TEXT_TRANSFORM_OPTION_NONE":0,"TEXT_TRANSFORM_OPTION_REMOVE_LINE_RETURNS":1,"TEXT_TRANSFORM_OPTION_ONE_WORD_PER_LINE":2,"TEXT_TRANSFORM_OPTION_ONE_CHARACTER_PER_LINE":3},"Slide.Element.DataLink.AutoAdvanceTimeRemaining.AutoAdvanceSource":{"AUTO_ADVANCE_SOURCE_PRESENTATION":0,"AUTO_ADVANCE_SOURCE_ANNOUNCEMENT":1},"Slide.Element.DataLink.GroupSourceType":{"GROUP_SOURCE_TYPE_CURRENT_SLIDE":0,"GROUP_SOURCE_TYPE_NEXT_SLIDE":1,"GROUP_SOURCE_TYPE_NEXT_GROUP":2},"Slide.Element.DataLink.PCOLive.CountdownType":{"COUNTDOWN_TYPE_FULL_ITEM_LENGTH":0,"COUNTDOWN_TYPE_END_ITEM_ON_TIME":1,"COUNTDOWN_TYPE_END_SERVICE_ON_TIME":2},"Slide.Element.DataLink.PCOLive.Theme":{"PCOLIVE_THEME_LIGHT":0,"PCOLIVE_THEME_DARK":1},"Slide.Element.DataLink.PlaybackMarkerIdentifier.Destination":{"PLAYBACK_MARKER_DESTINATION_PRESENTATION":0,"PLAYBACK_MARKER_DESTINATION_ANNOUNCEMENT":1,"PLAYBACK_MARKER_DESTINATION_AUDIO":2},"Slide.Element.DataLink.PlaybackMarkerIdentifier.Type":{"PLAYBACK_MARKER_IDENTIFIER_FIRST":0,"PLAYBACK_MARKER_IDENTIFIER_PREVIOUS":1,"PLAYBACK_MARKER_IDENTIFIER_NEXT":2,"PLAYBACK_MARKER_IDENTIFIER_LAST":3,"PLAYBACK_MARKER_IDENTIFIER_NAME":4},"Slide.Element.DataLink.PlaylistItem.PlaylistItemSourceType":{"PLAYLIST_ITEM_SOURCE_TYPE_CURRENT":0,"PLAYLIST_ITEM_SOURCE_TYPE_NEXT":1,"PLAYLIST_ITEM_SOURCE_TYPE_CURRENT_HEADER":2,"PLAYLIST_ITEM_SOURCE_TYPE_NEXT_HEADER":3,"PLAYLIST_ITEM_SOURCE_TYPE_PARENT_PLAYLIST":4},"Slide.Element.DataLink.Presentation.PresentationSource":{"PRESENTATION_SOURCE_PRESENTATION":0,"PRESENTATION_SOURCE_ANNOUNCEMENT":1},"Slide.Element.DataLink.RSSFeed.ContentType":{"CONTENT_TYPE_TITLE_ONLY":0,"CONTENT_TYPE_TITLE_AND_DESCRIPTION":1},"Slide.Element.DataLink.SlideCount.SlideCountSourceType":{"SLIDE_COUNT_SOURCE_TYPE_CURRENT":0,"SLIDE_COUNT_SOURCE_TYPE_REMAINING":1,"SLIDE_COUNT_SOURCE_TYPE_TOTAL":2},"Slide.Element.DataLink.SlideLabelSource":{"SLIDE_LABEL_SOURCE_CURRENT_SLIDE":0,"SLIDE_LABEL_SOURCE_NEXT_SLIDE":1},"Slide.Element.DataLink.SlideSourceType":{"SLIDE_SOURCE_TYPE_CURRENT_SLIDE":0,"SLIDE_SOURCE_TYPE_NEXT_SLIDE":1},"Slide.Element.DataLink.SlideText.TextSourceOption":{"TEXT_SOURCE_OPTION_TEXT":0,"TEXT_SOURCE_OPTION_NOTES":1,"TEXT_SOURCE_OPTION_ELEMENT_MATCHING_NAME":2},"Slide.Element.DataLink.Ticker.RSSType.ContentType":{"CONTENT_TYPE_TITLE_ONLY":0,"CONTENT_TYPE_TITLE_AND_DESCRIPTION":1},"Slide.Element.DataLink.VideoCountdown.VideoCountdownSource":{"VIDEO_COUNTDOWN_SOURCE_PRESENTATION":0,"VIDEO_COUNTDOWN_SOURCE_ANNOUNCEMENT":1},"Slide.Element.DataLink.VisibilityLink.Condition.AudioCountdownVisibility.AudioCountdownVisibilityCriterion":{"AUDIO_COUNTDOWN_VISIBILITY_CRITERION_HAS_TIME_REMAINING":0,"AUDIO_COUNTDOWN_VISIBILITY_CRITERION_HAS_EXPIRED":1,"AUDIO_COUNTDOWN_VISIBILITY_CRITERION_IS_RUNNING":2,"AUDIO_COUNTDOWN_VISIBILITY_CRITERION_NOT_RUNNING":3,"AUDIO_COUNTDOWN_VISIBILITY_CRITERION_LOOPING":4,"AUDIO_COUNTDOWN_VISIBILITY_CRITERION_NOT_LOOPING":5},"Slide.Element.DataLink.VisibilityLink.Condition.CaptureSessionVisibility.CaptureSessionVisibilityCriterion":{"CAPTURE_SESSION_VISIBILITY_CRITERION_ACTIVE":0,"CAPTURE_SESSION_VISIBILITY_CRITERION_INACTIVE":1},"Slide.Element.DataLink.VisibilityLink.Condition.ElementVisibility.ElementVisibilityCriterion":{"ELEMENT_VISIBILITY_CRITERION_HAS_TEXT":0,"ELEMENT_VISIBILITY_CRITERION_HAS_NO_TEXT":1},"Slide.Element.DataLink.VisibilityLink.Condition.TimerVisibility.TimerVisibilityCriterion":{"TIMER_VISIBILITY_CRITERION_HAS_TIME_REMAINING":0,"TIMER_VISIBILITY_CRITERION_HAS_EXPIRED":1,"TIMER_VISIBILITY_CRITERION_IS_RUNNING":2,"TIMER_VISIBILITY_CRITERION_NOT_RUNNING":3},"Slide.Element.DataLink.VisibilityLink.Condition.VideoCountdownVisibility.VideoCountdownVisibilityCriterion":{"VIDEO_COUNTDOWN_VISIBILITY_CRITERION_HAS_TIME_REMAINING":0,"VIDEO_COUNTDOWN_VISIBILITY_CRITERION_HAS_EXPIRED":1,"VIDEO_COUNTDOWN_VISIBILITY_CRITERION_IS_RUNNING":2,"VIDEO_COUNTDOWN_VISIBILITY_CRITERION_NOT_RUNNING":3,"VIDEO_COUNTDOWN_VISIBILITY_CRITERION_LOOPING":4,"VIDEO_COUNTDOWN_VISIBILITY_CRITERION_NOT_LOOPING":5},"Slide.Element.DataLink.VisibilityLink.Condition.VideoInputVisibility.VideoInputVisibilityCriterion":{"VIDEO_INPUT_VISIBILITY_CRITERION_ACTIVE":0,"VIDEO_INPUT_VISIBILITY_CRITERION_INACTIVE":1},"Slide.Element.DataLink.VisibilityLink.VisibilityCriterion":{"VISIBILITY_CRITERION_ALL":0,"VISIBILITY_CRITERION_ANY":1,"VISIBILITY_CRITERION_NONE":2},"Slide.Element.TextRevealType":{"TEXT_REVEAL_TYPE_NONE":0,"TEXT_REVEAL_TYPE_BULLET":1,"TEXT_REVEAL_TYPE_UNDERLINE":2},"Slide.Element.TextScroller.Direction":{"DIRECTION_LEFT":0,"DIRECTION_RIGHT":1,"DIRECTION_UP":2,"DIRECTION_DOWN":3},"Timer.Configuration.TimerTypeCountdownToTime.TimePeriod":{"TIME_PERIOD_AM":0,"TIME_PERIOD_PM":1,"TIME_PERIOD_24":2},"Timer.Format.Style":{"STYE_NONE":0,"STYLE_SHORT":1,"STYLE_LONG":2,"STYLE_REMOVE_SHORT":3,"STYLE_REMOVE_LONG":4},"URL.LocalRelativePath.Root":{"ROOT_UNKNOWN":0,"ROOT_BOOT_VOLUME":1,"ROOT_USER_HOME":2,"ROOT_USER_DOCUMENTS":3,"ROOT_USER_DOWNLOADS":4,"ROOT_USER_MUSIC":5,"ROOT_USER_PICTURES":6,"ROOT_USER_VIDEOS":7,"ROOT_USER_DESKTOP":11,"ROOT_USER_APP_SUPPORT":8,"ROOT_SHARED":9,"ROOT_SHOW":10,"ROOT_CURRENT_RESOURCE":12},"URL.Platform":{"PLATFORM_UNKNOWN":0,"PLATFORM_MACOS":1,"PLATFORM_WIN32":2,"PLATFORM_WEB":3}}};
+/* ===== Protobuf codec, driven by SCHEMA generated from greyshirtguy/ProPresenter7-Proto (Proto7.16.2) ===== */
+const SCALARS = new Set(["double","float","int32","int64","uint32","uint64","bool","string","bytes"]);
+const TE = new TextEncoder(), TD = new TextDecoder();
+class W { constructor(){ this.a=[]; }
+  byte(b){ this.a.push(b); }
+  varint(n){ if(n<0){ // negative int32/int64 -> 10-byte two's complement
+      let v=BigInt.asUintN(64,BigInt(n)); while(v>127n){ this.a.push(Number(v&127n)|128); v>>=7n; } this.a.push(Number(v)); return; }
+    while(n>127){ this.a.push((n%128)|128); n=Math.floor(n/128); } this.a.push(n); }
+  bytes(u){ for(let i=0;i<u.length;i++) this.a.push(u[i]); }
+  done(){ return Uint8Array.from(this.a); } }
+function encMsg(name, obj){
+  const def = SCHEMA.m[name]; if(!def) throw new Error("Unknown message "+name);
+  const w = new W();
+  const keys = Object.keys(obj).filter(k=>obj[k]!==undefined && obj[k]!==null);
+  for(const k of keys) if(!def[k]) throw new Error(name+" has no field '"+k+"'");
+  keys.sort((a,b)=>def[a][0]-def[b][0]);
+  const seenOneof = {}; // oneof group -> member already set
+  for(const k of keys){ const g = def[k][3]; if(!g) continue;
+    if(seenOneof[g]) throw new Error(name+": oneof '"+g+"' has two members set ('"+seenOneof[g]+"' and '"+k+"')");
+    seenOneof[g] = k; }
+  for(const k of keys){
+    const [num,type,rep,oneof] = def[k]; const vals = rep ? obj[k] : [obj[k]];
+    if(rep && !Array.isArray(obj[k])) throw new Error(name+"."+k+" must be array");
+    for(const v of vals) encField(w, num, type, v, oneof||rep, name+"."+k);
+  }
+  return w.done();
+}
+function encField(w, num, type, v, force, path){
+  const isEnum = !!SCHEMA.e[type];
+  if(isEnum){ const n = typeof v==="string" ? SCHEMA.e[type][v] : v;
+    if(n===undefined) throw new Error("bad enum "+path+"="+v);
+    if(n===0 && !force) return; w.varint(num<<3|0); w.varint(n); return; }
+  switch(type){
+    case "string": if(v==="" && !force) return; { const b=TE.encode(v); w.varint(num<<3|2); w.varint(b.length); w.bytes(b); } return;
+    case "bytes": if(!v.length && !force) return; w.varint(num<<3|2); w.varint(v.length); w.bytes(v); return;
+    case "bool": if(!v && !force) return; w.varint(num<<3|0); w.varint(v?1:0); return;
+    case "int32": case "int64": case "uint32": case "uint64":
+      if(!v && !force) return; w.varint(num<<3|0); w.varint(Math.round(v)); return;
+    case "double": if(!v && !force) return; { const d=new DataView(new ArrayBuffer(8)); d.setFloat64(0,v,true); w.varint(num<<3|1); w.bytes(new Uint8Array(d.buffer)); } return;
+    case "float": if(!v && !force) return; { const d=new DataView(new ArrayBuffer(4)); d.setFloat32(0,v,true); w.varint(num<<3|5); w.bytes(new Uint8Array(d.buffer)); } return;
+    default: { const b = encMsg(type, v); w.varint(num<<3|2); w.varint(b.length); w.bytes(b); }
+  }
+}
+// Decoder (used for the built-in self-check: re-reads our own output through the same schema)
+function auditDecoded(name, obj, where, issues){ // checks oneof exclusivity on a decoded message tree
+  const def = SCHEMA.m[name]; if(!def || !obj) return; const seen = {};
+  for(const k of Object.keys(obj)){ const f = def[k]; if(!f) continue;
+    if(f[3]){ if(seen[f[3]]) issues.push("oneof '"+f[3]+"' has two members ("+seen[f[3]]+", "+k+") at "+where); else seen[f[3]] = k; }
+    if(SCHEMA.m[f[1]]){ if(f[2]) obj[k].forEach((x,n)=>auditDecoded(f[1], x, where+"."+k+"["+n+"]", issues)); else auditDecoded(f[1], obj[k], where+"."+k, issues); } }
+}
+function decMsg(name, buf){
+  const def = SCHEMA.m[name]; const byNum = {}; for(const k in def) byNum[def[k][0]] = [k, ...def[k].slice(1)];
+  const out = {}; let p = 0;
+  const rv = ()=>{ let r=0n, s=0n, b; do{ b=buf[p++]; r|=BigInt(b&127)<<s; s+=7n; }while(b&128); return r; };
+  while(p<buf.length){
+    const key = Number(rv()), num = key>>>3, wt = key&7; let val;
+    if(wt===0) val = Number(BigInt.asIntN(64, rv()));
+    else if(wt===1){ val = new DataView(buf.buffer, buf.byteOffset+p, 8).getFloat64(0,true); p+=8; }
+    else if(wt===5){ val = new DataView(buf.buffer, buf.byteOffset+p, 4).getFloat32(0,true); p+=4; }
+    else if(wt===2){ const l=Number(rv()); val = buf.subarray(p,p+l); p+=l; }
+    else throw new Error("bad wire type "+wt);
+    const f = byNum[num]; if(!f) throw new Error(name+": unknown field "+num);
+    const [k,type,rep] = f;
+    if(wt===2){ if(type==="string") val=TD.decode(val); else if(type==="bytes"){} else if(SCHEMA.m[type]) val=decMsg(type,val); else throw new Error("len-delimited for "+type); }
+    else if(type==="bool") val = !!val;
+    if(rep){ (out[k]=out[k]||[]).push(val); } else out[k]=val;
+  }
+  return out;
+}
+
+/* ===== ZIP: reader (DecompressionStream) and writer (stored) ===== */
+async function inflateRaw(u8){
+  const ds = new DecompressionStream("deflate-raw");
+  const stream = new Blob([u8]).stream().pipeThrough(ds);
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+async function readZip(buf){
+  const u8 = new Uint8Array(buf), dv = new DataView(buf);
+  let e = u8.length-22; while(e>=0 && dv.getUint32(e,true)!==0x06054b50) e--;
+  if(e<0) throw new Error("Not a ZIP/PPTX file (no end-of-central-directory).");
+  const n = dv.getUint16(e+10,true); let p = dv.getUint32(e+16,true); const files = {};
+  for(let i=0;i<n;i++){
+    if(dv.getUint32(p,true)!==0x02014b50) throw new Error("Corrupt ZIP directory.");
+    const method=dv.getUint16(p+10,true), csize=dv.getUint32(p+20,true), nl=dv.getUint16(p+28,true), el=dv.getUint16(p+30,true), cl=dv.getUint16(p+32,true), off=dv.getUint32(p+42,true);
+    const name = TD.decode(u8.subarray(p+46,p+46+nl));
+    const lnl = dv.getUint16(off+26,true), lel = dv.getUint16(off+28,true), ds = off+30+lnl+lel;
+    files[name] = {method, data:u8.subarray(ds, ds+csize)};
+    p += 46+nl+el+cl;
+  }
+  const api = { names:()=>Object.keys(files), has:n=>n in files,
+    async get(n){ const f=files[n]; if(!f) return null; if(f.method===0) return f.data; if(f.method===8) return inflateRaw(f.data); throw new Error("Unsupported ZIP method "+f.method); },
+    async text(n){ const d=await api.get(n); return d?TD.decode(d):null; } };
+  return api;
+}
+const CRC_T = (()=>{ const t=new Uint32Array(256); for(let n=0;n<256;n++){ let c=n; for(let k=0;k<8;k++) c = c&1 ? 0xedb88320^(c>>>1) : c>>>1; t[n]=c>>>0; } return t; })();
+function crc32(u8){ let c=0xffffffff; for(let i=0;i<u8.length;i++) c=CRC_T[(c^u8[i])&255]^(c>>>8); return (c^0xffffffff)>>>0; }
+function makeZip(files){ // files: [{name, data:Uint8Array}] ; stored, UTF-8 names
+  const parts=[], cds=[]; let off=0; const d=new Date();
+  const dt=((d.getHours()<<11)|(d.getMinutes()<<5)|(d.getSeconds()>>1))&0xffff, dd=(((d.getFullYear()-1980)<<9)|((d.getMonth()+1)<<5)|d.getDate())&0xffff;
+  const u16=n=>[n&255,(n>>8)&255], u32=n=>[n&255,(n>>8)&255,(n>>16)&255,(n>>>24)&255];
+  for(const f of files){
+    const nm=TE.encode(f.name), crc=crc32(f.data), sz=f.data.length;
+    const lh=Uint8Array.from([...u32(0x04034b50),...u16(20),...u16(0x0800),...u16(0),...u16(dt),...u16(dd),...u32(crc),...u32(sz),...u32(sz),...u16(nm.length),...u16(0)]);
+    parts.push(lh,nm,f.data);
+    cds.push(Uint8Array.from([...u32(0x02014b50),...u16(20),...u16(20),...u16(0x0800),...u16(0),...u16(dt),...u16(dd),...u32(crc),...u32(sz),...u32(sz),...u16(nm.length),...u16(0),...u16(0),...u16(0),...u16(0),...u32(0),...u32(off)]),nm);
+    off += lh.length+nm.length+sz;
+  }
+  let cdLen=0; for(const c of cds) cdLen+=c.length;
+  const end=Uint8Array.from([...u32(0x06054b50),...u16(0),...u16(0),...u16(files.length),...u16(files.length),...u32(cdLen),...u32(off),...u16(0)]);
+  const all=[...parts,...cds,end]; let tot=0; for(const a of all) tot+=a.length;
+  const out=new Uint8Array(tot); let o=0; for(const a of all){ out.set(a,o); o+=a.length; } return out;
+}
+
+/* ===== OOXML helpers ===== */
+const NS_A="http://schemas.openxmlformats.org/drawingml/2006/main", NS_P="http://schemas.openxmlformats.org/presentationml/2006/main", NS_R="http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+const parseXml = s => { const d=new DOMParser().parseFromString(s,"application/xml"); if(d.querySelector("parsererror")) throw new Error("Malformed XML in PPTX."); return d; };
+const kids = (n,ln)=>{ const r=[]; if(!n) return r; for(const c of n.children) if(c.localName===ln) r.push(c); return r; };
+const kid = (n,ln)=> n ? kids(n,ln)[0]||null : null;
+const path = (n,...ls)=>{ for(const l of ls){ n=kid(n,l); if(!n) return null; } return n; };
+const attr = (n,a)=> n ? n.getAttribute(a) : null;
+const relsPath = p => p.replace(/([^/]+)$/,"_rels/$1.rels");
+function resolvePath(base, target){ if(target.startsWith("/")) return target.slice(1);
+  const parts = base.split("/"); parts.pop(); for(const s of target.split("/")){ if(s==="..") parts.pop(); else if(s!==".") parts.push(s); } return parts.join("/"); }
+async function loadPart(zip, p){
+  const t = await zip.text(p); if(t===null) return null;
+  const rels = {}; const rt = await zip.text(relsPath(p));
+  if(rt){ for(const r of parseXml(rt).documentElement.children) rels[r.getAttribute("Id")] = { type:r.getAttribute("Type"), target:resolvePath(p, r.getAttribute("Target")), external:r.getAttribute("TargetMode")==="External" }; }
+  return { path:p, doc:parseXml(t), rels };
+}
+
+/* ===== Colors ===== */
+function hex2rgb(h){ return {r:parseInt(h.slice(0,2),16), g:parseInt(h.slice(2,4),16), b:parseInt(h.slice(4,6),16)}; }
+function rgb2hsl({r,g,b}){ r/=255;g/=255;b/=255; const mx=Math.max(r,g,b), mn=Math.min(r,g,b); let h=0,s=0,l=(mx+mn)/2;
+  if(mx!==mn){ const d=mx-mn; s=l>.5?d/(2-mx-mn):d/(mx+mn); h = mx===r ? (g-b)/d+(g<b?6:0) : mx===g ? (b-r)/d+2 : (r-g)/d+4; h/=6; } return {h,s,l}; }
+function hsl2rgb({h,s,l}){ if(s===0){ const v=Math.round(l*255); return {r:v,g:v,b:v}; }
+  const q=l<.5?l*(1+s):l+s-l*s, p=2*l-q, f=t=>{ if(t<0)t+=1; if(t>1)t-=1; return t<1/6?p+(q-p)*6*t : t<.5?q : t<2/3?p+(q-p)*(2/3-t)*6 : p; };
+  return {r:Math.round(f(h+1/3)*255), g:Math.round(f(h)*255), b:Math.round(f(h-1/3)*255)}; }
+function resolveColor(node, ctx){ // node = element containing a color choice child (solidFill, or a clr element itself)
+  if(!node) return null;
+  const clrEls = ["srgbClr","schemeClr","sysClr","prstClr","scrgbClr","hslClr"]; let c = clrEls.includes(node.localName) ? node : null;
+  if(!c) for(const k of node.children) if(clrEls.includes(k.localName)){ c=k; break; }
+  if(!c) return null; let rgb = null;
+  if(c.localName==="srgbClr") rgb = hex2rgb(c.getAttribute("val"));
+  else if(c.localName==="sysClr") rgb = hex2rgb(c.getAttribute("lastClr")||"000000");
+  else if(c.localName==="prstClr"){ const m={black:"000000",white:"FFFFFF",red:"FF0000",green:"008000",blue:"0000FF",yellow:"FFFF00",gray:"808080"}; rgb = hex2rgb(m[c.getAttribute("val")]||"000000"); }
+  else if(c.localName==="schemeClr"){ let v=c.getAttribute("val"); v = ctx.clrMap[v]||v; const t=ctx.theme[v]; if(!t) return {r:0,g:0,b:0,alpha:1}; rgb = hex2rgb(t); }
+  else return null;
+  let alpha=1;
+  for(const m of c.children){ const val=parseInt(m.getAttribute("val"))/100000;
+    if(m.localName==="lumMod"||m.localName==="lumOff"||m.localName==="satMod"){ const h=rgb2hsl(rgb); if(m.localName==="lumMod") h.l*=val; else if(m.localName==="lumOff") h.l+=val; else h.s*=val; h.l=Math.min(1,Math.max(0,h.l)); h.s=Math.min(1,Math.max(0,h.s)); rgb=hsl2rgb(h); }
+    else if(m.localName==="tint") rgb={r:rgb.r+(255-rgb.r)*(1-val), g:rgb.g+(255-rgb.g)*(1-val), b:rgb.b+(255-rgb.b)*(1-val)};
+    else if(m.localName==="shade") rgb={r:rgb.r*val, g:rgb.g*val, b:rgb.b*val};
+    else if(m.localName==="alpha") alpha=val; }
+  return {r:Math.round(rgb.r), g:Math.round(rgb.g), b:Math.round(rgb.b), alpha};
+}
+const toProColor = c => ({red:c.r/255, green:c.g/255, blue:c.b/255, alpha:c.alpha===undefined?1:c.alpha});
+
+/* ===== PPTX -> internal PresentationModel ===== */
+const IMG_OK = {png:1,jpg:1,jpeg:1,gif:1,bmp:1,tif:1,tiff:1};
+async function parsePptx(buf, warn){
+  const zip = await readZip(buf);
+  if(!zip.has("ppt/presentation.xml")) throw new Error("This ZIP is not a PowerPoint (.pptx) presentation: ppt/presentation.xml is missing.");
+  const pres = await loadPart(zip, "ppt/presentation.xml");
+  const sz = path(pres.doc.documentElement,"sldSz"); if(!sz) throw new Error("Missing slide size.");
+  const W = +sz.getAttribute("cx"), H = +sz.getAttribute("cy");
+  const out = { name:"", emuW:W, emuH:H, scale:1920/W, width:1920, height:Math.round(1920*H/W), slides:[], media:{} };
+  const K = out.scale; // EMU -> output units; 1pt = 12700 EMU
+  const slideIds = kids(path(pres.doc.documentElement,"sldIdLst"),"sldId").map(s=>s.getAttributeNS(NS_R,"id"));
+  const defaultTextStyle = path(pres.doc.documentElement,"defaultTextStyle");
+  const cache = {}; const getPart = async p => cache[p] || (cache[p] = await loadPart(zip,p));
+  const mediaUse = {}; // path -> {file}
+  function addMedia(p){ const ext=(p.split(".").pop()||"").toLowerCase();
+    if(!IMG_OK[ext]){ warn("Unsupported image type ."+ext+" ("+p.split("/").pop()+") was skipped."); return null; }
+    const file = p.split("/").pop(); mediaUse[p] = file; return file; }
+
+  for(let si=0; si<slideIds.length; si++){
+    const rid = slideIds[si]; const target = pres.rels[rid]?.target; if(!target) continue;
+    const slidePart = await getPart(target); if(!slidePart) continue;
+    const layoutRel = Object.values(slidePart.rels).find(r=>/slideLayout$/.test(r.type)); const layout = layoutRel ? await getPart(layoutRel.target) : null;
+    const masterRel = layout && Object.values(layout.rels).find(r=>/slideMaster$/.test(r.type)); const master = masterRel ? await getPart(masterRel.target) : null;
+    const themeRel = master && Object.values(master.rels).find(r=>/theme$/.test(r.type)); const themePart = themeRel ? await getPart(themeRel.target) : null;
+    const theme = {}, fonts = {major:"Arial", minor:"Arial"};
+    if(themePart){ const cs = themePart.doc.getElementsByTagNameNS(NS_A,"clrScheme")[0];
+      if(cs) for(const c of cs.children){ const k=c.localName, v=c.firstElementChild; theme[k] = v.getAttribute("val")==null||v.localName==="sysClr" ? (v.getAttribute("lastClr")||"000000") : v.getAttribute("val"); }
+      const fs = themePart.doc.getElementsByTagNameNS(NS_A,"fontScheme")[0];
+      if(fs){ fonts.major = attr(path(fs,"majorFont","latin"),"typeface")||"Arial"; fonts.minor = attr(path(fs,"minorFont","latin"),"typeface")||"Arial"; } }
+    const clrMap = {}; const cm = master && path(master.doc.documentElement,"clrMap"); if(cm) for(const a of cm.attributes) clrMap[a.name]=a.value;
+    const ctx = { theme, clrMap, fonts };
+    const slide = { index:si+1, elements:[], bg:null, bgImage:null };
+
+    const placeholderOf = sp => path(sp,"nvSpPr","nvPr","ph") || path(sp,"nvPicPr","nvPr","ph");
+    const findPh = (part, ph) => { if(!part||!ph) return null; const tree = path(part.doc.documentElement,"cSld","spTree"); if(!tree) return null;
+      const type = ph.getAttribute("type")||"body", idx = ph.getAttribute("idx");
+      const norm = t => ({ctrTitle:"title",subTitle:"body",obj:"body",body:"body",title:"title"}[t]||t);
+      let hit=null; for(const sp of kids(tree,"sp")){ const p=placeholderOf(sp); if(!p) continue;
+        if(idx!==null && p.getAttribute("idx")===idx){ hit=sp; break; }
+        if(!hit && (p.getAttribute("type")||"body")===type) hit=sp; else if(!hit && norm(p.getAttribute("type")||"body")===norm(type) && idx===null) hit=sp; }
+      return hit; };
+    const phKind = ph => { const t=ph?(ph.getAttribute("type")||"body"):null; return !t?"other":(t==="title"||t==="ctrTitle")?"title":(["body","subTitle","obj"].includes(t)?"body":"other"); };
+
+    function xfrmOf(sp, ph){ for(const cand of [sp, ph&&findPh(layout,ph), ph&&findPh(master,ph)]){ if(!cand) continue;
+        const x = path(cand,"spPr","xfrm") || path(cand,"xfrm") || path(cand,"grpSpPr","xfrm"); if(x && path(x,"off")) return x; } return null; }
+    const readX = x => { const o=path(x,"off"), e=path(x,"ext"); return { x:+o.getAttribute("x"), y:+o.getAttribute("y"), w:+e.getAttribute("cx"), h:+e.getAttribute("cy"), rot:+(x.getAttribute("rot")||0), flipH:x.getAttribute("flipH")==="1" }; };
+
+    // style chain for a given placeholder kind/level
+    function styleChain(sp, ph, lvl){ const chain=[]; const ln="lvl"+(lvl+1)+"pPr";
+      chain.push(path(defaultTextStyle,ln));
+      const tx = master && path(master.doc.documentElement,"txStyles", {title:"titleStyle",body:"bodyStyle",other:"otherStyle"}[phKind(ph)]); chain.push(path(tx,ln));
+      if(ph){ chain.push(path(findPh(master,ph),"txBody","lstStyle",ln)); chain.push(path(findPh(layout,ph),"txBody","lstStyle",ln)); }
+      chain.push(path(sp,"txBody","lstStyle",ln)); return chain.filter(Boolean); }
+    function pick(chain, getter){ for(let i=chain.length-1;i>=0;i--){ const v=getter(chain[i]); if(v!==null && v!==undefined) return v; } return null; }
+
+    function bodyPrOf(sp, ph){ let r={anchor:null,l:null,t:null,r:null,b:null,fit:null,fontScale:1};
+      for(const cand of [ph&&findPh(master,ph), ph&&findPh(layout,ph), sp]){ const bp=cand&&path(cand,"txBody","bodyPr"); if(!bp) continue;
+        if(bp.getAttribute("anchor")) r.anchor=bp.getAttribute("anchor");
+        for(const [k,a] of [["l","lIns"],["t","tIns"],["r","rIns"],["b","bIns"]]) if(bp.getAttribute(a)!==null) r[k]=+bp.getAttribute(a);
+        const na = path(bp,"normAutofit"); if(na){ r.fit="shrink"; r.fontScale = na.getAttribute("fontScale") ? +na.getAttribute("fontScale")/100000 : 1; } else if(path(bp,"noAutofit")||path(bp,"spAutoFit")) { r.fit=null; r.fontScale=1; } }
+      return r; }
+
+    function textOf(sp, ph, box){ const body=path(sp,"txBody"); if(!body) return null; const paras=[]; let any=false; const bp=bodyPrOf(sp,ph);
+      for(const p of kids(body,"p")){ const pPr=path(p,"pPr"); const lvl=pPr&&pPr.getAttribute("lvl")?+pPr.getAttribute("lvl"):0; const chain=styleChain(sp,ph,lvl);
+        const algn = (pPr&&pPr.getAttribute("algn")) || pick(chain,c=>c.getAttribute("algn")) || "l";
+        let bullet=null; const bc = (pPr&&path(pPr,"buChar")) || pick(chain,c=>path(c,"buChar")); const bn=(pPr&&path(pPr,"buNone"))||pick(chain,c=>path(c,"buNone"));
+        if(bc && !bn && phKind(ph)!=="title") bullet = bc.getAttribute("char")||"•";
+        const runs=[]; const pushRun=(r,text)=>{ const rPr=path(r,"rPr"); const d=pick(chain,c=>path(c,"defRPr"));
+          const cands=[...chain.map(c=>path(c,"defRPr")).filter(Boolean), rPr].filter(Boolean);
+          const get = f => { for(let i=cands.length-1;i>=0;i--){ const v=f(cands[i]); if(v!==null&&v!==undefined) return v; } return null; };
+          let size = get(c=>c.getAttribute("sz")?+c.getAttribute("sz")/100:null) || 18; size *= bp.fontScale;
+          const bold = get(c=>c.getAttribute("b")!==null? c.getAttribute("b")==="1"||c.getAttribute("b")==="true":null)||false;
+          const ital = get(c=>c.getAttribute("i")!==null? c.getAttribute("i")==="1"||c.getAttribute("i")==="true":null)||false;
+          const und = get(c=>c.getAttribute("u")!==null? c.getAttribute("u")!=="none":null)||false;
+          let face = get(c=>attr(path(c,"latin"),"typeface")) || "+mn-lt"; if(face==="+mj-lt") face=fonts.major; else if(face==="+mn-lt") face=fonts.minor;
+          const colNode = get(c=>path(c,"solidFill")); const col = resolveColor(colNode, ctx) || {r:0,g:0,b:0,alpha:1};
+          runs.push({ text, size:size*12700*K, bold, italic:ital, underline:und, face, color:col }); };
+        for(const r of p.children){ if(r.localName==="r"||r.localName==="fld"){ const t=path(r,"t"); const text=t?t.textContent:""; if(text) { any=true; pushRun(r,text); } }
+          else if(r.localName==="br"){ runs.push({br:true}); } }
+        if(bullet && runs.length){ const first=runs.find(x=>!x.br); if(first) runs.unshift({...first, text:bullet+" "}); }
+        paras.push({ algn, runs }); }
+      if(!any) return null;
+      return { paras, bp }; }
+
+    // Walk a spTree, appending elements. xf = accumulated group mapper
+    function walk(tree, mapper, list, isMasterLayer){
+      for(const n of tree.children){
+        if(n.localName==="grpSp"){ const gx=path(n,"grpSpPr","xfrm"); let m=mapper;
+          if(gx){ const o=path(gx,"off"), e=path(gx,"ext"), co=path(gx,"chOff"), ce=path(gx,"chExt");
+            const g={x:+o.getAttribute("x"),y:+o.getAttribute("y"),w:+e.getAttribute("cx"),h:+e.getAttribute("cy")}, c={x:+co.getAttribute("x"),y:+co.getAttribute("y"),w:+ce.getAttribute("cx"),h:+ce.getAttribute("cy")};
+            const sx=c.w?g.w/c.w:1, sy=c.h?g.h/c.h:1; m = r=>mapper({x:g.x+(r.x-c.x)*sx, y:g.y+(r.y-c.y)*sy, w:r.w*sx, h:r.h*sy}); }
+          walk(n, m, list, isMasterLayer); continue; }
+        if(n.localName==="graphicFrame"){ warn("Slide "+(si+1)+": a table/chart/graphic frame was skipped (not representable)."); continue; }
+        if(n.localName==="cxnSp"){ continue; }
+        if(n.localName!=="sp" && n.localName!=="pic") continue;
+        const ph = placeholderOf(n);
+        if(isMasterLayer && ph) continue; // layout/master placeholders are prompts, not content
+        const x = xfrmOf(n, ph); if(!x){ continue; }
+        const g = readX(x); const r = mapper({x:g.x,y:g.y,w:g.w,h:g.h});
+        const bounds = { x:r.x*K, y:r.y*K, w:r.w*K, h:r.h*K };
+        if(g.rot) warn("Slide "+(si+1)+": rotation on a shape was ignored.");
+        const name = attr(path(n,"nvSpPr","cNvPr")||path(n,"nvPicPr","cNvPr"),"name")||"";
+        if(n.localName==="pic"){
+          const blip = path(n,"blipFill","blip"); const rid = blip && blip.getAttributeNS(NS_R,"embed"); const rel = rid && (isMasterLayer ? (isMasterLayer.rels[rid]) : slidePart.rels[rid]);
+          if(!rel){ continue; } const file = addMedia(rel.target); if(!file) continue;
+          const sr = path(n,"blipFill","srcRect"); if(sr && [...sr.attributes].some(a=>+a.value)) warn("Slide "+(si+1)+": picture cropping was ignored for "+file+" (shown uncropped & stretched).");
+          list.push({ kind:"image", name:name||file, file, bounds, srcPath:rel.target }); continue; }
+        // sp
+        const spPr = path(n,"spPr"); const geom = attr(path(spPr,"prstGeom"),"prst")||"rect";
+        const fillNode = path(spPr,"solidFill"); const fillCol = fillNode ? resolveColor(fillNode,ctx) : null;
+        const blipFill = path(spPr,"blipFill");
+        const t = textOf(n, ph);
+        if(blipFill && !t){ const blip=path(blipFill,"blip"), rid=blip&&blip.getAttributeNS(NS_R,"embed"), rel=rid&&(isMasterLayer?isMasterLayer.rels[rid]:slidePart.rels[rid]); if(rel){ const f=addMedia(rel.target); if(f) list.push({kind:"image",name:name||f,file:f,bounds,srcPath:rel.target}); continue; } }
+        if(!t && !fillCol) continue;
+        if(!["rect","roundRect","textbox"].includes(geom) && fillCol && !t){ warn("Slide "+(si+1)+": shape '"+geom+"' was skipped (only rectangles are supported)."); continue; }
+        if(!["rect","roundRect"].includes(geom) && fillCol && t) warn("Slide "+(si+1)+": '"+geom+"' shape fill was drawn as a rectangle behind its text.");
+        const nb = path(spPr,"noFill");
+        list.push({ kind: t ? "text":"rect", name, bounds, fill: nb?null:fillCol, text:t, ph:!!ph });
+      } }
+
+    // background: slide -> layout -> master
+    for(const part of [slidePart, layout, master]){ if(!part) continue; const bg = path(part.doc.documentElement,"cSld","bg"); if(!bg) continue;
+      const pr = path(bg,"bgPr"), ref = path(bg,"bgRef");
+      if(pr){ const sf=path(pr,"solidFill"); if(sf){ slide.bg = resolveColor(sf,ctx); break; }
+        const bf=path(pr,"blipFill"); if(bf){ const rid=path(bf,"blip")?.getAttributeNS(NS_R,"embed"); const rel=rid&&part.rels[rid]; if(rel){ const f=addMedia(rel.target); if(f){ slide.bgImage={file:f,srcPath:rel.target}; break; } } }
+        const gf=path(pr,"gradFill"); if(gf){ const gs=path(gf,"gsLst","gs"); slide.bg=resolveColor(gs,ctx); warn("Slide "+(si+1)+": gradient background approximated by its first color."); break; } }
+      else if(ref){ const c=resolveColor(ref,ctx); if(c){ slide.bg=c; break; } } }
+    // content: master shapes, layout shapes, then slide
+    const showMaster = attr(slidePart.doc.documentElement,"showMasterSp")!=="0" && attr(layout&&layout.doc.documentElement,"showMasterSp")!=="0";
+    const ident = r=>r;
+    if(master && showMaster){ const t=path(master.doc.documentElement,"cSld","spTree"); if(t) walk(t, ident, slide.elements, master); }
+    if(layout){ const t=path(layout.doc.documentElement,"cSld","spTree"); if(t) walk(t, ident, slide.elements, layout); }
+    walk(path(slidePart.doc.documentElement,"cSld","spTree"), ident, slide.elements, null);
+    out.slides.push(slide);
+  }
+  for(const [p,file] of Object.entries(mediaUse)){ out.media[file] = await zip.get(p); }
+  out.mediaSrc = mediaUse;
+  return out;
+}
+
+/* ===== PresentationModel -> ProPresenter 7 protobuf ===== */
+const PLATFORM = "PLATFORM_MACOS";           // ApplicationInfo.Platform (Proto7.16.2)
+const URL_PLATFORM = "PLATFORM_MACOS";       // URL.Platform
+function uuidv4(){ const b=crypto.getRandomValues(new Uint8Array(16)); b[6]=b[6]&15|64; b[8]=b[8]&63|128; const h=[...b].map(x=>x.toString(16).padStart(2,"0")).join("").toUpperCase(); return h.slice(0,8)+"-"+h.slice(8,12)+"-"+h.slice(12,16)+"-"+h.slice(16,20)+"-"+h.slice(20); }
+const U = () => ({ string: uuidv4() });
+const rtfEsc = s => { let o=""; for(let i=0;i<s.length;i++){ const c=s.charCodeAt(i); if(c===92||c===123||c===125) o+="\\"+s[i]; else if(c>126){ o+="\\u"+(c>32767?c-65536:c)+"?"; } else if(c===10) o+="\\line "; else o+=s[i]; } return o; };
+function buildRtf(text){ const fonts=[], colors=[]; const fi=f=>{ let i=fonts.indexOf(f); if(i<0){ fonts.push(f); i=fonts.length-1; } return i; }; const ci=c=>{ const k=c.r+","+c.g+","+c.b; let i=colors.indexOf(k); if(i<0){ colors.push(k); i=colors.length-1; } return i+1; };
+  let body="";
+  text.paras.forEach((p,pi)=>{ const al={l:"ql",ctr:"qc",r:"qr",just:"qj",dist:"qj"}[p.algn]||"ql"; body+="\\pard\\pardirnatural\\"+al+"\\partightenfactor0\n";
+    for(const r of p.runs){ if(r.br){ body+="\\line "; continue; }
+      body+="{\\f"+fi(r.face)+"\\fs"+Math.round(r.size*2)+(r.bold?"\\b":"")+(r.italic?"\\i":"")+(r.underline?"\\ul":"")+"\\cf"+ci(r.color)+" "+rtfEsc(r.text)+"}"; }
+    if(pi<text.paras.length-1) body+="\\\n"; });
+  return "{\\rtf1\\ansi\\ansicpg1252\\cocoartf2639\n\\cocoatextscaling0\\cocoaplatform0{\\fonttbl"+fonts.map((f,i)=>"\\f"+i+"\\fnil\\fcharset0 "+rtfEsc(f)+";").join("")+"}\n{\\colortbl;"+colors.map(c=>{const [r,g,b]=c.split(",");return "\\red"+r+"\\green"+g+"\\blue"+b+";";}).join("")+"}\n{\\*\\expandedcolortbl;"+colors.map(()=>";").join("")+"}\n"+body+"}";
+}
+let MEDIA_BYTES = {};
+function imgSize(u){ // pixel size from PNG / JPEG / GIF / BMP / WebP headers; null if not recognised
+  try{ const dv=new DataView(u.buffer,u.byteOffset,u.byteLength);
+    if(u[0]===0x89&&u[1]===0x50&&u[2]===0x4e&&u[3]===0x47) return {w:dv.getUint32(16),h:dv.getUint32(20)};
+    if(u[0]===0x47&&u[1]===0x49&&u[2]===0x46) return {w:dv.getUint16(6,true),h:dv.getUint16(8,true)};
+    if(u[0]===0x42&&u[1]===0x4d) return {w:Math.abs(dv.getInt32(18,true)),h:Math.abs(dv.getInt32(22,true))};
+    if(u[0]===0xff&&u[1]===0xd8){ let p=2; while(p+9<u.length){ if(u[p]!==0xff){ p++; continue; } const m=u[p+1]; if(m===0xff){ p++; continue; }
+        if(m>=0xc0&&m<=0xcf&&m!==0xc4&&m!==0xc8&&m!==0xcc) return {w:dv.getUint16(p+7),h:dv.getUint16(p+5)};
+        if(m===0xd8||m===0x01||(m>=0xd0&&m<=0xd7)){ p+=2; continue; } p+=2+dv.getUint16(p+2); } return null; }
+    if(String.fromCharCode(...u.subarray(0,4))==="RIFF"&&String.fromCharCode(...u.subarray(8,12))==="WEBP"){ const t=String.fromCharCode(...u.subarray(12,16));
+      if(t==="VP8X") return {w:1+(u[24]|u[25]<<8|u[26]<<16),h:1+(u[27]|u[28]<<8|u[29]<<16)};
+      if(t==="VP8L"){ const b=dv.getUint32(21,true); return {w:1+(b&0x3fff),h:1+((b>>14)&0x3fff)}; }
+      if(t==="VP8 ") return {w:dv.getUint16(26,true)&0x3fff,h:dv.getUint16(28,true)&0x3fff}; }
+  }catch(e){} return null; }
+// Every ProPresenter element carries a Graphics.Path describing its outline (fills, media and text are drawn inside it).
+// Normalised unit rectangle, closed, shape TYPE_RECTANGLE.
+function rectPath(){ const P=(x,y)=>({ point:{x,y}, q0:{x,y}, q1:{x,y} });
+  return { closed:true, points:[P(0,0),P(1,0),P(1,1),P(0,1)], shape:{ type:"TYPE_RECTANGLE" } }; }
+function mediaUrl(file){ return { platform:URL_PLATFORM, relative_path:file, local:{ root:"ROOT_CURRENT_RESOURCE", path:file } }; }
+function imageElement(it){ const url = mediaUrl(it.file);
+  const drawing = { scale_behavior:"SCALE_BEHAVIOR_STRETCH" }; const ns = MEDIA_BYTES[it.file] && imgSize(MEDIA_BYTES[it.file]);
+  if(ns && ns.w>0 && ns.h>0) drawing.natural_size = { width:ns.w, height:ns.h };
+  return { element:{ uuid:U(), name:it.name, bounds:{origin:{x:it.bounds.x,y:it.bounds.y}, size:{width:it.bounds.w,height:it.bounds.h}}, opacity:1,
+    path:rectPath(), fill:{ enable:true, media:{ uuid:U(), url, image:{ drawing, file:{ local_url:url } } } } } }; }
+function rectElement(it){ return { element:{ uuid:U(), name:it.name, bounds:{origin:{x:it.bounds.x,y:it.bounds.y}, size:{width:it.bounds.w,height:it.bounds.h}}, opacity:1, path:rectPath(), fill:{ enable:true, color:toProColor(it.fill) } } }; }
+function textElement(it){ const t=it.text, first=t.paras.flatMap(p=>p.runs).find(r=>!r.br);
+  const face = first.bold&&first.italic?"Bold Italic":first.bold?"Bold":first.italic?"Italic":"Regular";
+  const el = { uuid:U(), name:it.name, bounds:{origin:{x:it.bounds.x,y:it.bounds.y}, size:{width:it.bounds.w,height:it.bounds.h}}, opacity:1, path:rectPath(),
+    text:{ attributes:{ font:{ name:first.face, size:first.size, bold:first.bold, italic:first.italic, family:first.face, face },
+        text_solid_fill:toProColor(first.color), paragraph_style:{ alignment:{l:"ALIGNMENT_LEFT",ctr:"ALIGNMENT_CENTER",r:"ALIGNMENT_RIGHT",just:"ALIGNMENT_JUSTIFIED"}[t.paras[0].algn]||"ALIGNMENT_LEFT", line_height_multiple:1 } },
+      rtf_data:TE.encode(buildRtf(t)), vertical_alignment:{t:"VERTICAL_ALIGNMENT_TOP",ctr:"VERTICAL_ALIGNMENT_MIDDLE",b:"VERTICAL_ALIGNMENT_BOTTOM"}[t.bp.anchor||"t"]||"VERTICAL_ALIGNMENT_TOP",
+      scale_behavior:"SCALE_BEHAVIOR_NONE", margins:{ left:(t.bp.l??91440)*SCALE_K, right:(t.bp.r??91440)*SCALE_K, top:(t.bp.t??45720)*SCALE_K, bottom:(t.bp.b??45720)*SCALE_K } } };
+  if(it.fill) el.fill = { enable:true, color:toProColor(it.fill) };
+  return { element:el, info:2 }; }
+let SCALE_K = 1;
+function buildProPresenterPresentation(model, name){
+  SCALE_K = model.scale; MEDIA_BYTES = model.media||{}; const now = Math.floor(Date.now()/1000);
+  const cues=[], cueIds=[];
+  for(const s of model.slides){
+    const elements=[]; 
+    if(s.bgImage) elements.push(imageElement({name:"Background", file:s.bgImage.file, bounds:{x:0,y:0,w:model.width,h:model.height}}));
+    for(const it of s.elements){ if(it.kind==="image") elements.push(imageElement(it)); else if(it.kind==="rect") elements.push(rectElement(it)); else if(it.kind==="text") elements.push(textElement(it)); }
+    const slide = { elements, size:{width:model.width,height:model.height}, uuid:U() };
+    if(s.bg){ slide.draws_background_color=true; slide.background_color=toProColor(s.bg); }
+    const cueId=U(); cueIds.push(cueId);
+    cues.push({ uuid:cueId, isEnabled:true, actions:[{ uuid:U(), isEnabled:true, type:"ACTION_TYPE_PRESENTATION_SLIDE", slide:{ presentation:{ base_slide:slide } } }] });
+  }
+  const group = { uuid:U(), name:"Slides", color:{red:0.5,green:0.5,blue:0.5,alpha:1} };
+  const pres = { application_info:{ platform:PLATFORM, platform_version:{major_version:13,minor_version:0,patch_version:0}, application:"APPLICATION_PROPRESENTER", application_version:{major_version:7,minor_version:16,patch_version:2} },
+    uuid:U(), name, last_modified_date:{seconds:now,nanos:0}, cue_groups:[{ group, cue_identifiers:cueIds }], cues };
+  return encMsg("Presentation", pres);
+}
+/* Self-check. Everything here is checked against the 7.16.2 schema only; it cannot prove ProPresenter will render the result. */
+const UUID_RE = /^[0-9A-F]{8}-[0-9A-F]{4}-4[0-9A-F]{3}-[89AB][0-9A-F]{3}-[0-9A-F]{12}$/;
+function sameBytes(a,b){ if(a.length!==b.length) return false; for(let i=0;i<a.length;i++) if(a[i]!==b[i]) return false; return true; }
+function verifyPresentation(bytes, model, mediaFiles){
+  const issues=[]; let p; const stats={cues:0,elements:0,text:0,images:0,rects:0,refs:0,files:0,uuids:0};
+  try{ p = decMsg("Presentation", bytes); }catch(e){ return { ok:false, issues:["decode failed: "+e.message], ...stats }; }
+  // 1. round trip: decode -> encode must reproduce the exact bytes
+  try{ if(!sameBytes(encMsg("Presentation", p), bytes)) issues.push("protobuf round-trip is not byte-identical"); }catch(e){ issues.push("round-trip encode failed: "+e.message); }
+  // 2. oneof exclusivity on the decoded tree
+  auditDecoded("Presentation", p, "Presentation", issues);
+  // 3. hierarchy: group -> cue -> action -> slide -> elements
+  const ids=new Set(); const noteId=(u,w)=>{ const s=u&&u.string; if(!s||!UUID_RE.test(s)) issues.push("bad or missing UUID at "+w); else if(ids.has(s)) issues.push("duplicate UUID "+s+" at "+w); else ids.add(s); };
+  if(!p.application_info) issues.push("missing application_info"); if(!p.name) issues.push("missing presentation name"); noteId(p.uuid,"presentation");
+  const cues=p.cues||[]; stats.cues=cues.length;
+  if(cues.length!==model.slides.length) issues.push("cue count "+cues.length+" != slide count "+model.slides.length);
+  const groups=p.cue_groups||[]; if(groups.length!==1) issues.push("expected exactly one cue group, found "+groups.length);
+  const g=groups[0]; if(g){ noteId(g.group&&g.group.uuid,"cue group");
+    const listed=(g.cue_identifiers||[]).map(x=>x.string); if(listed.length!==cues.length || listed.some((s,i)=>s!==(cues[i].uuid||{}).string)) issues.push("cue group does not list every cue, in order"); }
+  const need=new Set(); const kindsWanted = s => (s.bgImage?1:0)+s.elements.length;
+  cues.forEach((c,ci)=>{ const w="slide "+(ci+1); const ms=model.slides[ci]; noteId(c.uuid,w+" cue");
+    if(!c.isEnabled) issues.push(w+": cue not enabled");
+    if((c.actions||[]).length!==1){ issues.push(w+": cue has "+(c.actions||[]).length+" actions (expected 1)"); return; }
+    const act=c.actions[0]; noteId(act.uuid,w+" action");
+    if(act.type!==11) issues.push(w+": action type is not ACTION_TYPE_PRESENTATION_SLIDE");
+    const sl=act.slide&&act.slide.presentation&&act.slide.presentation.base_slide; if(!sl){ issues.push(w+": action has no presentation.base_slide"); return; }
+    noteId(sl.uuid,w+" base_slide"); if(!sl.size||!(sl.size.width>0)||!(sl.size.height>0)) issues.push(w+": slide size missing");
+    const els=sl.elements||[]; if(ms && els.length!==kindsWanted(ms)) issues.push(w+": "+els.length+" elements, expected "+kindsWanted(ms));
+    const wanted = ms ? [...(ms.bgImage?[{kind:"image",file:ms.bgImage.file}]:[]), ...ms.elements] : [];
+    els.forEach((se,ei)=>{ const e=se.element, ew=w+" element "+(ei+1); stats.elements++;
+      if(!e){ issues.push(ew+": Slide.Element has no Graphics.Element"); return; }
+      noteId(e.uuid,ew); if(!e.bounds||!e.bounds.size||!(e.bounds.size.width>0)||!(e.bounds.size.height>0)) issues.push(ew+": bounds missing or zero size");
+      if(!(e.opacity>0)) issues.push(ew+": opacity missing/zero (element would be invisible)");
+      if(!e.path||!e.path.closed||(e.path.points||[]).length<3||!e.path.shape||!e.path.shape.type) issues.push(ew+": missing Graphics.Path (closed outline with >=3 points and a shape type)");
+      const want=wanted[ei];
+      if(e.text){ stats.text++; const rtf=e.text.rtf_data?TD.decode(e.text.rtf_data):"";
+        if(!rtf.startsWith("{\\rtf1")) issues.push(ew+": text has no RTF payload");
+        if(!e.text.attributes||!e.text.attributes.font||!e.text.attributes.font.name) issues.push(ew+": text attributes/font missing");
+        if(want&&want.kind==="text"){ for(const para of want.text.paras) for(const r of para.runs) if(!r.br && !rtf.includes(rtfEsc(r.text))) issues.push(ew+": text run '"+r.text.slice(0,30)+"' missing from RTF"); }
+        else if(want) issues.push(ew+": model expects "+want.kind+" but element is text"); }
+      else if(e.fill&&e.fill.media){ stats.images++; const m=e.fill.media, u=m.url;
+        noteId(m.uuid,ew+" media"); if(!e.fill.enable) issues.push(ew+": media fill not enabled");
+        if(!u||!u.relative_path||!u.local||u.local.path!==u.relative_path||u.local.root!==12) issues.push(ew+": media URL incomplete/inconsistent (needs relative_path + local{ROOT_CURRENT_RESOURCE,path} naming the same file)"); else { need.add(u.relative_path); stats.refs++; }
+        if(!u||!u.platform) issues.push(ew+": media URL has no platform");
+        const iu=m.image&&m.image.file&&m.image.file.local_url; if(!iu||!u||iu.relative_path!==u.relative_path) issues.push(ew+": image.file.local_url does not match media url");
+        if(!m.image||!m.image.drawing) issues.push(ew+": image drawing properties missing");
+        if(want&&(want.kind!=="image"||want.file!==(u&&u.relative_path))) issues.push(ew+": media file differs from model"); }
+      else if(e.fill&&e.fill.color){ stats.rects++; if(want&&want.kind!=="rect") issues.push(ew+": model expects "+want.kind+" but element is a color rectangle"); }
+      else issues.push(ew+": element has neither text, media nor color fill (nothing to draw)"); }); });
+  for(const f of need) if(!mediaFiles.includes(f)) issues.push("media '"+f+"' is referenced but not in the bundle file list");
+  stats.files=need.size; stats.uuids=ids.size;
+  return { ok:issues.length===0, issues, ...stats };
+}
+async function verifyBundle(bundle, pro, base, mediaFiles, model){ // re-open the finished ZIP and compare it with what we meant to write
+  const issues=[]; const z=await readZip(bundle.buffer.slice(bundle.byteOffset, bundle.byteOffset+bundle.byteLength));
+  const names=z.names(); const proName=base+".pro";
+  if(!z.has(proName)) issues.push("bundle lacks "+proName); else if(!sameBytes(await z.get(proName), pro)) issues.push("bundle copy of "+proName+" differs from the generated .pro");
+  for(const f of mediaFiles){ if(!z.has(f)) issues.push("bundle lacks media file "+f); else if(!sameBytes(await z.get(f), model.media[f])) issues.push("bundle copy of "+f+" differs from the source image"); }
+  const extra=names.filter(n=>n!==proName && !mediaFiles.includes(n)); if(extra.length) issues.push("unexpected files in bundle: "+extra.join(", "));
+  return issues;
+}
+
+const $ = id => document.getElementById(id);
+let selected=null, output=null;
+const drop=$("drop"), input=$("fileInput");
+$("choose").onclick=()=>input.click();
+input.onchange=()=>input.files[0]&&selectFile(input.files[0]);
+["dragenter","dragover"].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.add("over")}));
+["dragleave","drop"].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.remove("over")}));
+drop.addEventListener("drop",ev=>{const f=ev.dataTransfer.files[0]; if(f) selectFile(f)});
+const fmt=b=>b<1024?b+" B":b<1048576?(b/1024).toFixed(1)+" KB":(b/1048576).toFixed(1)+" MB";
+const step=(s,st)=>{ const li=document.querySelector('[data-s="'+s+'"]'); li.className=st; li.firstChild.textContent = st==="done"?"✓":st==="fail"?"✕":st==="run"?"…":"○"; };
+const tick=()=>new Promise(r=>setTimeout(r,30));
+function selectFile(file){
+  $("err").style.display="none"; $("warning").style.display="none"; $("results").style.display="none";
+  if(!file.name.toLowerCase().endsWith(".pptx")){ showErr("Please choose a .pptx PowerPoint file."); return; }
+  selected=file; $("fileName").textContent=file.name; $("fileSize").textContent=fmt(file.size); $("fileInfo").style.display="block";
+  convert();
+}
+function showErr(m){ $("err").textContent=m; $("err").style.display="block"; $("status").textContent="Needs attention"; }
+async function convert(){
+  drop.classList.add("disabled"); $("steps").style.display="block"; $("status").textContent="Converting…";
+  document.querySelectorAll("#steps li").forEach(li=>{li.className="";li.firstChild.textContent="○"});
+  const warnings=[]; const warn=m=>{ if(!warnings.includes(m)) warnings.push(m); }; let cur="read";
+  try{
+    step("read","run"); await tick(); const buf=await selected.arrayBuffer();
+    const base=selected.name.replace(/\.pptx$/i,"");
+    const model=await parsePptx(buf,warn); model.name=base; step("read","done");
+    cur="slides"; step("slides","run"); await tick();
+    const nEl=model.slides.reduce((a,s)=>a+s.elements.length,0); step("slides","done");
+    cur="media"; step("media","run"); await tick();
+    const mediaFiles=Object.keys(model.media); step("media","done");
+    cur="pro"; step("pro","run"); await tick();
+    const pro=buildProPresenterPresentation(model, base); step("pro","done");
+    cur="bundle"; step("bundle","run"); await tick();
+    const chk=verifyPresentation(pro, model, mediaFiles);
+    if(!chk.ok) throw new Error("Self-check failed: "+chk.issues.join(", "));
+    const files=[{name:base+".pro",data:pro}, ...mediaFiles.map(f=>({name:f,data:model.media[f]}))];
+    const bundle=makeZip(files);
+    const bIssues=await verifyBundle(bundle, pro, base, mediaFiles, model); if(bIssues.length) throw new Error("Bundle check failed: "+bIssues.join(", "));
+    step("bundle","done");
+    output={pro,bundle,base};
+    $("resultSub").textContent=model.slides.length+" slides, "+nEl+" objects, "+mediaFiles.length+" media file"+(mediaFiles.length===1?"":"s")+". Schema self-check passed: "+chk.cues+" slides, "+chk.elements+" elements ("+chk.text+" text, "+chk.images+" image, "+chk.rects+" shape) re-read from the encoded bytes; "+chk.refs+" media references resolve to files inside the bundle.";
+    $("results").style.display="block"; $("status").textContent="Complete";
+    if(warnings.length){ const w=$("warning"); w.innerHTML="<b>Not everything could be carried over:</b><ul>"+warnings.map(x=>"<li></li>").join("")+"</ul>"; [...w.querySelectorAll("li")].forEach((li,i)=>li.textContent=warnings[i]); w.style.display="block"; }
+    window.__result={slides:model.slides.length, media:mediaFiles, warnings, check:chk};
+    window.__output=output;
+  }catch(e){ console.error(e); step(cur,"fail"); showErr(e.message||String(e)); window.__result={error:e.message}; }
+  drop.classList.remove("disabled");
+}
+function dl(bytes,name,type){ const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([bytes],{type})); a.download=name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),1500); }
+$("downloadPro").onclick=()=>output&&dl(output.pro,output.base+".pro","application/octet-stream");
+$("downloadBundle").onclick=()=>output&&dl(output.bundle,output.base+".probundle","application/zip");
+</script>
+</body>
+</html>
